@@ -618,6 +618,10 @@ class FamilyTree {
         const rows = tree.querySelectorAll('.pedigree-row');
         const treeRect = tree.getBoundingClientRect();
 
+        // Get connector color based on theme
+        const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+        const lineColor = isDarkMode ? '#6b7a8a' : '#c4b5a0';
+
         // Draw lines connecting parents to children
         // For each family unit in a row, find all their children in the next row
         for (let i = 0; i < rows.length - 1; i++) {
@@ -675,7 +679,7 @@ class FamilyTree {
                 downLine.setAttribute('y1', topY);
                 downLine.setAttribute('x2', centerX);
                 downLine.setAttribute('y2', midY);
-                downLine.setAttribute('stroke', '#c4b5a0');
+                downLine.setAttribute('stroke', lineColor);
                 downLine.setAttribute('stroke-width', '2');
                 svg.appendChild(downLine);
 
@@ -699,7 +703,7 @@ class FamilyTree {
                         hLine.setAttribute('y1', midY);
                         hLine.setAttribute('x2', child.x);
                         hLine.setAttribute('y2', midY);
-                        hLine.setAttribute('stroke', '#c4b5a0');
+                        hLine.setAttribute('stroke', lineColor);
                         hLine.setAttribute('stroke-width', '2');
                         svg.appendChild(hLine);
                     }
@@ -709,7 +713,7 @@ class FamilyTree {
                     toChild.setAttribute('y1', midY);
                     toChild.setAttribute('x2', child.x);
                     toChild.setAttribute('y2', child.y);
-                    toChild.setAttribute('stroke', '#c4b5a0');
+                    toChild.setAttribute('stroke', lineColor);
                     toChild.setAttribute('stroke-width', '2');
                     svg.appendChild(toChild);
                 } else {
@@ -723,7 +727,7 @@ class FamilyTree {
                     hBar.setAttribute('y1', midY);
                     hBar.setAttribute('x2', maxX);
                     hBar.setAttribute('y2', midY);
-                    hBar.setAttribute('stroke', '#c4b5a0');
+                    hBar.setAttribute('stroke', lineColor);
                     hBar.setAttribute('stroke-width', '2');
                     svg.appendChild(hBar);
 
@@ -734,7 +738,7 @@ class FamilyTree {
                         toChild.setAttribute('y1', midY);
                         toChild.setAttribute('x2', child.x);
                         toChild.setAttribute('y2', child.y);
-                        toChild.setAttribute('stroke', '#c4b5a0');
+                        toChild.setAttribute('stroke', lineColor);
                         toChild.setAttribute('stroke-width', '2');
                         svg.appendChild(toChild);
                     });
