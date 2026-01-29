@@ -618,115 +618,128 @@ class FamilyTree {
         const rows = tree.querySelectorAll('.pedigree-row');
         const treeRect = tree.getBoundingClientRect();
 
-        // Draw lines connecting parents to children (FamilySearch style)
+        // Draw lines connecting parents to children
+        // For each family unit in a row, find all their children in the next row
         for (let i = 0; i < rows.length - 1; i++) {
             const parentRow = rows[i];
             const childRow = rows[i + 1];
 
-            const parentCards = parentRow.querySelectorAll('.person-card, .empty-slot');
-            const childCards = childRow.querySelectorAll('.person-card, .empty-slot');
+            const familyUnits = parentRow.querySelectorAll('.family-unit');
+            const childCards = childRow.querySelectorAll('.person-card');
 
-            // Each pair of parents connects to one child
-            for (let p = 0; p < parentCards.length; p += 2) {
-                const parent1 = parentCards[p];
-                const parent2 = parentCards[p + 1];
-                const childIndex = Math.floor(p / 2);
-                const child = childCards[childIndex];
+            familyUnits.forEach(unit => {
+                const parentCards = unit.querySelectorAll('.person-card');
+                if (parentCards.length === 0) return;
 
-                if (!child) continue;
+                // Get parent IDs from this family unit
+                const parentIds = [];
+                parentCards.forEach(card => {
+                    const personId = card.getAttribute('data-person-id');
+                    if (personId) parentIds.push(personId);
+                });
 
-                const childRect = child.getBoundingClientRect();
-                const childX = childRect.left + childRect.width / 2 - treeRect.left;
-                const childY = childRect.top - treeRect.top;
+                if (parentIds.length === 0) return;
 
-                // Get parent positions
-                const p1Valid = parent1 && !parent1.classList.contains('empty-slot');
-                const p2Valid = parent2 && !parent2.classList.contains('empty-slot');
+                // Find children of these parents
+                const children = [];
+                childCards.forEach(childCard => {
+                    const childId = childCard.getAttribute('data-person-id');
+                    if (!childId) return;
 
-                if (p1Valid || p2Valid) {
-                    let p1Rect = p1Valid ? parent1.getBoundingClientRect() : null;
-                    let p2Rect = p2Valid ? parent2.getBoundingClientRect() : null;
+                    const child = this.getPerson(childId);
+                    if (!child) return;
 
-                    // Calculate the center point between both parents (or single parent position)
-                    let centerX, topY;
-                    if (p1Valid && p2Valid) {
-                        const p1X = p1Rect.left + p1Rect.width / 2 - treeRect.left;
-                        const p2X = p2Rect.left + p2Rect.width / 2 - treeRect.left;
-                        centerX = (p1X + p2X) / 2;
-                        topY = Math.max(p1Rect.bottom, p2Rect.bottom) - treeRect.top;
+                    // Check if this child belongs to these parents
+                    if ((child.fatherId && parentIds.includes(child.fatherId)) ||
+                        (child.motherId && parentIds.includes(child.motherId))) {
+                        children.push(childCard);
+                    }
+                });
 
-                        // Draw horizontal line connecting the couple
-                        const coupleLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        coupleLine.setAttribute('x1', p1X);
-                        coupleLine.setAttribute('y1', topY + 15);
-                        coupleLine.setAttribute('x2', p2X);
-                        coupleLine.setAttribute('y2', topY + 15);
-                        coupleLine.setAttribute('stroke', '#c4b5a0');
-                        coupleLine.setAttribute('stroke-width', '2');
-                        svg.appendChild(coupleLine);
+                if (children.length === 0) return;
 
-                        // Short vertical lines from each parent down to the horizontal line
-                        [p1X, p2X].forEach(px => {
-                            const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            vLine.setAttribute('x1', px);
-                            vLine.setAttribute('y1', topY);
-                            vLine.setAttribute('x2', px);
-                            vLine.setAttribute('y2', topY + 15);
-                            vLine.setAttribute('stroke', '#c4b5a0');
-                            vLine.setAttribute('stroke-width', '2');
-                            svg.appendChild(vLine);
-                        });
+                // Calculate parent center point
+                const firstParent = parentCards[0];
+                const lastParent = parentCards[parentCards.length - 1];
+                const firstRect = firstParent.getBoundingClientRect();
+                const lastRect = lastParent.getBoundingClientRect();
 
-                        // Vertical line from center down to child
-                        const downLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        downLine.setAttribute('x1', centerX);
-                        downLine.setAttribute('y1', topY + 15);
-                        downLine.setAttribute('x2', centerX);
-                        downLine.setAttribute('y2', childY - 15);
-                        downLine.setAttribute('stroke', '#c4b5a0');
-                        downLine.setAttribute('stroke-width', '2');
-                        svg.appendChild(downLine);
+                const centerX = (firstRect.left + firstRect.width / 2 + lastRect.left + lastRect.width / 2) / 2 - treeRect.left;
+                const topY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
 
-                        // Horizontal line to child if needed
-                        if (Math.abs(centerX - childX) > 2) {
-                            const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            hLine.setAttribute('x1', centerX);
-                            hLine.setAttribute('y1', childY - 15);
-                            hLine.setAttribute('x2', childX);
-                            hLine.setAttribute('y2', childY - 15);
-                            hLine.setAttribute('stroke', '#c4b5a0');
-                            hLine.setAttribute('stroke-width', '2');
-                            svg.appendChild(hLine);
-                        }
+                // Draw vertical line from parent center down
+                const midY = topY + 30; // How far down to go before branching
 
-                        // Final vertical line to child
+                const downLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                downLine.setAttribute('x1', centerX);
+                downLine.setAttribute('y1', topY);
+                downLine.setAttribute('x2', centerX);
+                downLine.setAttribute('y2', midY);
+                downLine.setAttribute('stroke', '#c4b5a0');
+                downLine.setAttribute('stroke-width', '2');
+                svg.appendChild(downLine);
+
+                // Get child positions
+                const childPositions = children.map(childCard => {
+                    const childRect = childCard.getBoundingClientRect();
+                    return {
+                        x: childRect.left + childRect.width / 2 - treeRect.left,
+                        y: childRect.top - treeRect.top
+                    };
+                });
+
+                if (childPositions.length === 1) {
+                    // Single child - just draw a line down
+                    const child = childPositions[0];
+
+                    if (Math.abs(centerX - child.x) > 2) {
+                        // Need horizontal then vertical
+                        const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        hLine.setAttribute('x1', centerX);
+                        hLine.setAttribute('y1', midY);
+                        hLine.setAttribute('x2', child.x);
+                        hLine.setAttribute('y2', midY);
+                        hLine.setAttribute('stroke', '#c4b5a0');
+                        hLine.setAttribute('stroke-width', '2');
+                        svg.appendChild(hLine);
+                    }
+
+                    const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    toChild.setAttribute('x1', child.x);
+                    toChild.setAttribute('y1', midY);
+                    toChild.setAttribute('x2', child.x);
+                    toChild.setAttribute('y2', child.y);
+                    toChild.setAttribute('stroke', '#c4b5a0');
+                    toChild.setAttribute('stroke-width', '2');
+                    svg.appendChild(toChild);
+                } else {
+                    // Multiple children - draw horizontal bar connecting them all
+                    const minX = Math.min(...childPositions.map(c => c.x));
+                    const maxX = Math.max(...childPositions.map(c => c.x));
+
+                    // Horizontal bar across all children
+                    const hBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    hBar.setAttribute('x1', minX);
+                    hBar.setAttribute('y1', midY);
+                    hBar.setAttribute('x2', maxX);
+                    hBar.setAttribute('y2', midY);
+                    hBar.setAttribute('stroke', '#c4b5a0');
+                    hBar.setAttribute('stroke-width', '2');
+                    svg.appendChild(hBar);
+
+                    // Vertical lines down to each child
+                    childPositions.forEach(child => {
                         const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        toChild.setAttribute('x1', childX);
-                        toChild.setAttribute('y1', childY - 15);
-                        toChild.setAttribute('x2', childX);
-                        toChild.setAttribute('y2', childY);
+                        toChild.setAttribute('x1', child.x);
+                        toChild.setAttribute('y1', midY);
+                        toChild.setAttribute('x2', child.x);
+                        toChild.setAttribute('y2', child.y);
                         toChild.setAttribute('stroke', '#c4b5a0');
                         toChild.setAttribute('stroke-width', '2');
                         svg.appendChild(toChild);
-
-                    } else {
-                        // Single parent - direct line
-                        const parentRect = p1Valid ? p1Rect : p2Rect;
-                        const parentX = parentRect.left + parentRect.width / 2 - treeRect.left;
-                        topY = parentRect.bottom - treeRect.top;
-
-                        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                        const midY = (topY + childY) / 2;
-
-                        const d = `M ${parentX} ${topY} L ${parentX} ${midY} L ${childX} ${midY} L ${childX} ${childY}`;
-                        path.setAttribute('d', d);
-                        path.setAttribute('fill', 'none');
-                        path.setAttribute('stroke', '#c4b5a0');
-                        path.setAttribute('stroke-width', '2');
-                        svg.appendChild(path);
-                    }
+                    });
                 }
-            }
+            });
         }
 
         tree.style.position = 'relative';
@@ -1071,7 +1084,7 @@ class FamilyTree {
             : initials;
 
         return `
-            <div class="person-card" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}">
+            <div class="person-card" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
                 <div class="card-actions">
                     <button class="card-action-btn" onclick="event.stopPropagation(); app.openPersonModal('${person.id}')" title="Edit">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
