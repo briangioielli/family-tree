@@ -98,12 +98,8 @@ class FamilyTree {
                     }
                 }
 
-                // If no data exists, load sample data
-                if (this.people.length === 0) {
-                    this.loadSampleData();
-                } else {
-                    this.render();
-                }
+                // Render the tree (even if empty - will show empty state)
+                this.render();
             }, (error) => {
                 console.error('Error loading data from Firebase:', error);
                 // Fall back to localStorage if Firebase fails
