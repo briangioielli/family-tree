@@ -469,6 +469,13 @@ class FamilyTree {
         this.saveData();
     }
 
+    confirmDeletePerson(id, name) {
+        if (confirm(`Are you sure you want to delete ${name}? This will also remove them from any family relationships. This cannot be undone.`)) {
+            this.deletePerson(id);
+            this.showTree();
+        }
+    }
+
     addEvent(personId, eventData) {
         const person = this.getPerson(personId);
         if (person) {
@@ -1363,6 +1370,15 @@ class FamilyTree {
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                             Edit
+                        </button>
+                        <button class="btn btn-danger" onclick="app.confirmDeletePerson('${person.id}', '${person.name.replace(/'/g, "\\'")}')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                <line x1="10" y1="11" x2="10" y2="17"/>
+                                <line x1="14" y1="11" x2="14" y2="17"/>
+                            </svg>
+                            Delete
                         </button>
                     </div>
                 </div>
