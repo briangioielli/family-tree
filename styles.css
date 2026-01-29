@@ -389,25 +389,42 @@ body {
 .pedigree-row {
     display: flex;
     justify-content: center;
-    gap: 24px;
+    gap: 40px;
     position: relative;
     padding: 20px 0;
+    flex-wrap: wrap;
+}
+
+/* Family Unit (couple or single person) */
+.family-unit {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: relative;
+}
+
+/* Spouse connector line */
+.spouse-connector {
+    width: 30px;
+    height: 3px;
+    background: var(--primary);
+    position: relative;
+}
+
+.spouse-connector::before {
+    content: '♥';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    color: var(--primary);
+    background: var(--background);
+    padding: 0 4px;
 }
 
 .pedigree-row.generation-0 {
     margin-bottom: 20px;
-}
-
-.pedigree-row.generation-1 {
-    gap: 80px;
-}
-
-.pedigree-row.generation-2 {
-    gap: 40px;
-}
-
-.pedigree-row.generation-3 {
-    gap: 20px;
 }
 
 /* Connector Lines Container */
@@ -2052,6 +2069,79 @@ body {
 .button-group {
     display: flex;
     gap: 8px;
+}
+
+.btn-text {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 8px 16px;
+}
+
+.btn-text:hover {
+    color: var(--text-primary);
+    background: var(--background);
+}
+
+/* Link Choice Modal */
+.link-choice-modal {
+    padding: 24px;
+    text-align: center;
+}
+
+.link-choice-modal h3 {
+    margin-bottom: 24px;
+    color: var(--text-primary);
+}
+
+.link-choice-options {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.link-choice-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+}
+
+.link-choice-section h4 {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin: 0;
+}
+
+.link-person-select {
+    width: 100%;
+    max-width: 300px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.link-choice-divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.link-choice-divider::before,
+.link-choice-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.link-choice-cancel {
+    margin-top: 16px;
 }
 
 /* Photo Upload */

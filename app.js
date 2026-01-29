@@ -734,46 +734,38 @@ class FamilyTree {
             return;
         }
 
-        const focusedPerson = this.getPerson(this.focusedPersonId);
-        if (!focusedPerson) {
-            this.focusedPersonId = this.people[0].id;
-            this.renderPedigree();
-            return;
-        }
+        // Build a complete family tree showing everyone
+        const generations = this.buildFamilyTree();
 
-        // Build ancestor tree (up to 8 generations to show full tree)
-        const generations = this.buildAncestorTree(focusedPerson, 8);
+        console.log('Family tree generations:', generations.length, 'Total people:', this.people.length);
 
-        // Debug: log how many generations we have
-        console.log('Pedigree generations:', generations.length, 'Total people:', this.people.length);
-
-        // Render vertical pedigree (top to bottom)
+        // Render vertical pedigree (top to bottom, oldest at top)
         let html = '<div class="pedigree-tree">';
 
-        // Start from the oldest generation at the top
-        const reversedGenerations = [...generations].reverse();
+        generations.forEach((gen, genIndex) => {
+            html += `<div class="pedigree-row generation-${genIndex}">`;
 
-        reversedGenerations.forEach((gen, genIndex) => {
-            const actualGenIndex = generations.length - 1 - genIndex;
-            const childGen = reversedGenerations[genIndex + 1] || null;
-            html += `<div class="pedigree-row generation-${actualGenIndex}">`;
-            gen.forEach((person, personIndex) => {
-                if (person) {
-                    html += this.renderPersonCard(person, person.id === this.focusedPersonId, actualGenIndex, personIndex);
-                } else {
-                    // Find the child this empty slot belongs to
-                    const childIndex = Math.floor(personIndex / 2);
-                    const child = childGen ? childGen[childIndex] : null;
-                    const isFatherSlot = personIndex % 2 === 0;
-                    html += this.renderEmptySlot(actualGenIndex, child, isFatherSlot);
+            gen.forEach((unit, unitIndex) => {
+                // Each unit is either a couple or a single person
+                html += '<div class="family-unit">';
+
+                if (unit.person1) {
+                    html += this.renderPersonCard(unit.person1, false, genIndex, unitIndex * 2);
                 }
-            });
-            html += '</div>';
 
-            // Add connector row between generations (except after the last row)
-            if (genIndex < reversedGenerations.length - 1) {
-                html += this.renderConnectorRow(gen, reversedGenerations[genIndex + 1], actualGenIndex);
-            }
+                // Show spouse connector if there's a couple
+                if (unit.person1 && unit.person2) {
+                    html += '<div class="spouse-connector"></div>';
+                }
+
+                if (unit.person2) {
+                    html += this.renderPersonCard(unit.person2, false, genIndex, unitIndex * 2 + 1);
+                }
+
+                html += '</div>';
+            });
+
+            html += '</div>';
         });
 
         html += '</div>';
@@ -783,6 +775,158 @@ class FamilyTree {
 
         container.innerHTML = html;
     }
+
+    buildFamilyTree() {
+        // Step 1: Find TRUE root ancestors
+        // A root is someone who has no parents AND whose spouse (if any) also has no parents
+        // This prevents in-laws from appearing at the top level
+
+        const peopleWithChildren = new Set();
+        this.people.forEach(p => {
+            if (p.fatherId) peopleWithChildren.add(p.fatherId);
+            if (p.motherId) peopleWithChildren.add(p.motherId);
+        });
+
+        // Helper: does this person have parents in the system?
+        const hasParentsInSystem = (person) => {
+            return (person.fatherId && this.getPerson(person.fatherId)) ||
+                   (person.motherId && this.getPerson(person.motherId));
+        };
+
+        // Helper: does this person's spouse have parents?
+        const spouseHasParents = (person) => {
+            if (!person.spouseIds || person.spouseIds.length === 0) return false;
+            return person.spouseIds.some(spouseId => {
+                const spouse = this.getPerson(spouseId);
+                return spouse && hasParentsInSystem(spouse);
+            });
+        };
+
+        const rootAncestors = this.people.filter(p => {
+            // Must have no parents
+            if (hasParentsInSystem(p)) return false;
+
+            // If spouse has parents, this person is NOT a root
+            // (they'll be added as a spouse in the spouse's generation)
+            if (spouseHasParents(p)) return false;
+
+            return true;
+        });
+
+        if (rootAncestors.length === 0 && this.people.length > 0) {
+            // Fallback: use the person with most ancestors as focus
+            return [[{ person1: this.people[0], person2: null }]];
+        }
+
+        // Step 2: Group root ancestors - but don't pair with spouses who aren't roots
+        const processedIds = new Set();
+        const rootUnits = [];
+
+        rootAncestors.forEach(person => {
+            if (processedIds.has(person.id)) return;
+            processedIds.add(person.id);
+
+            // Only pair with spouse if spouse is also a root ancestor
+            let spouse = null;
+            if (person.spouseIds && person.spouseIds.length > 0) {
+                for (const spouseId of person.spouseIds) {
+                    const potentialSpouse = this.getPerson(spouseId);
+                    if (potentialSpouse && rootAncestors.find(r => r.id === spouseId) && !processedIds.has(spouseId)) {
+                        spouse = potentialSpouse;
+                        processedIds.add(spouseId);
+                        break;
+                    }
+                }
+            }
+
+            rootUnits.push({ person1: person, person2: spouse });
+        });
+
+        // Step 3: Build generations downward from roots
+        const generations = [rootUnits];
+        const allProcessedIds = new Set(processedIds);
+        let currentGen = rootUnits;
+        let maxIterations = 20;
+
+        while (maxIterations-- > 0) {
+            const nextGen = [];
+            const nextGenIds = new Set();
+
+            currentGen.forEach(unit => {
+                const parentIds = [unit.person1?.id, unit.person2?.id].filter(Boolean);
+
+                // Find children of anyone in this unit
+                const children = this.people.filter(p =>
+                    !allProcessedIds.has(p.id) &&
+                    ((p.fatherId && parentIds.includes(p.fatherId)) ||
+                     (p.motherId && parentIds.includes(p.motherId)))
+                );
+
+                children.forEach(child => {
+                    if (nextGenIds.has(child.id)) return;
+                    nextGenIds.add(child.id);
+                    allProcessedIds.add(child.id);
+
+                    // Find spouse for this child (spouse may not be processed yet)
+                    let childSpouse = null;
+                    if (child.spouseIds && child.spouseIds.length > 0) {
+                        for (const spouseId of child.spouseIds) {
+                            if (!allProcessedIds.has(spouseId) && !nextGenIds.has(spouseId)) {
+                                childSpouse = this.getPerson(spouseId);
+                                if (childSpouse) {
+                                    nextGenIds.add(spouseId);
+                                    allProcessedIds.add(spouseId);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    nextGen.push({ person1: child, person2: childSpouse });
+                });
+            });
+
+            if (nextGen.length === 0) break;
+
+            generations.push(nextGen);
+            currentGen = nextGen;
+        }
+
+        // Step 4: Handle anyone not yet in tree (truly disconnected)
+        const disconnected = this.people.filter(p => !allProcessedIds.has(p.id));
+        if (disconnected.length > 0) {
+            const disconnectedProcessed = new Set();
+            const disconnectedUnits = [];
+
+            disconnected.forEach(person => {
+                if (disconnectedProcessed.has(person.id)) return;
+                disconnectedProcessed.add(person.id);
+
+                let spouse = null;
+                if (person.spouseIds && person.spouseIds.length > 0) {
+                    for (const spouseId of person.spouseIds) {
+                        if (!disconnectedProcessed.has(spouseId) && !allProcessedIds.has(spouseId)) {
+                            spouse = this.getPerson(spouseId);
+                            if (spouse) {
+                                disconnectedProcessed.add(spouseId);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                disconnectedUnits.push({ person1: person, person2: spouse });
+            });
+
+            if (disconnectedUnits.length > 0) {
+                // Add as a new generation at the bottom
+                generations.push(disconnectedUnits);
+            }
+        }
+
+        return generations;
+    }
+
 
     renderAllPeopleSection() {
         if (this.people.length <= 1) return '';
@@ -1259,17 +1403,132 @@ class FamilyTree {
     }
 
     openAddFamilyMemberModal(type, personId) {
-        // Open the person modal with pre-set relationship
+        const person = this.getPerson(personId);
+        const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+
+        // Get list of potential people to link (exclude self and already-linked people)
+        let availablePeople = this.people.filter(p => p.id !== personId);
+
+        // For parents, exclude people who are already set as that parent type
+        if (type === 'father' && person.fatherId) {
+            availablePeople = availablePeople.filter(p => p.id !== person.fatherId);
+        }
+        if (type === 'mother' && person.motherId) {
+            availablePeople = availablePeople.filter(p => p.id !== person.motherId);
+        }
+        if (type === 'spouse') {
+            availablePeople = availablePeople.filter(p => !person.spouseIds.includes(p.id));
+        }
+
+        if (availablePeople.length === 0) {
+            // No existing people to link, just open create new
+            this.openPersonModal(null);
+            setTimeout(() => {
+                if (type === 'father' || type === 'mother') {
+                    document.getElementById('personForm').dataset.addAsParentTo = personId;
+                    document.getElementById('personForm').dataset.parentType = type;
+                } else if (type === 'spouse') {
+                    document.getElementById('personForm').dataset.addAsSpouseTo = personId;
+                }
+            }, 100);
+            return;
+        }
+
+        // Show a choice modal: link existing or create new
+        const choiceHtml = `
+            <div class="link-choice-modal">
+                <h3>Add ${typeLabel} for ${person.name.split(' ')[0]}</h3>
+                <div class="link-choice-options">
+                    <div class="link-choice-section">
+                        <h4>Link Existing Person</h4>
+                        <select id="linkExistingPerson" class="link-person-select">
+                            <option value="">-- Select a person --</option>
+                            ${availablePeople.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-primary" onclick="app.linkExistingPerson('${type}', '${personId}')">Link Selected Person</button>
+                    </div>
+                    <div class="link-choice-divider">
+                        <span>OR</span>
+                    </div>
+                    <div class="link-choice-section">
+                        <h4>Create New Person</h4>
+                        <button class="btn btn-secondary" onclick="app.createNewFamilyMember('${type}', '${personId}')">Create New ${typeLabel}</button>
+                    </div>
+                </div>
+                <button class="btn btn-text link-choice-cancel" onclick="app.closeLinkChoiceModal()">Cancel</button>
+            </div>
+        `;
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'linkChoiceOverlay';
+        overlay.className = 'modal-overlay active';
+        overlay.innerHTML = `<div class="modal">${choiceHtml}</div>`;
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                this.closeLinkChoiceModal();
+            }
+        });
+    }
+
+    closeLinkChoiceModal() {
+        const overlay = document.getElementById('linkChoiceOverlay');
+        if (overlay) {
+            overlay.remove();
+        }
+    }
+
+    linkExistingPerson(type, personId) {
+        const select = document.getElementById('linkExistingPerson');
+        const selectedId = select.value;
+
+        if (!selectedId) {
+            alert('Please select a person to link');
+            return;
+        }
+
+        const person = this.getPerson(personId);
+        const linkedPerson = this.getPerson(selectedId);
+
+        if (type === 'father') {
+            person.fatherId = selectedId;
+            this.savePersonToFirebase(person);
+        } else if (type === 'mother') {
+            person.motherId = selectedId;
+            this.savePersonToFirebase(person);
+        } else if (type === 'spouse') {
+            // Add to both people's spouse lists
+            if (!person.spouseIds.includes(selectedId)) {
+                person.spouseIds.push(selectedId);
+                this.savePersonToFirebase(person);
+            }
+            if (!linkedPerson.spouseIds.includes(personId)) {
+                linkedPerson.spouseIds.push(personId);
+                this.savePersonToFirebase(linkedPerson);
+            }
+        }
+
+        this.saveData();
+        this.closeLinkChoiceModal();
+
+        // Refresh the current view
+        if (this.currentPersonId === personId) {
+            this.showTimeline(personId);
+        }
+        this.render();
+    }
+
+    createNewFamilyMember(type, personId) {
+        this.closeLinkChoiceModal();
         this.openPersonModal(null);
 
-        // After a short delay, set the relationship fields
         setTimeout(() => {
             if (type === 'father' || type === 'mother') {
-                // We're adding a parent to this person - we'll handle this after save
                 document.getElementById('personForm').dataset.addAsParentTo = personId;
                 document.getElementById('personForm').dataset.parentType = type;
             } else if (type === 'spouse') {
-                // We're adding a spouse
                 document.getElementById('personForm').dataset.addAsSpouseTo = personId;
             }
         }, 100);
