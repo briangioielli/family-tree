@@ -2093,10 +2093,18 @@ class FamilyTree {
             }
         }
 
-        // Quick-add birth event if checkbox is checked (only for new people)
-        if (!id && document.getElementById('createBirthEvent').checked && personData.birthDate) {
-            const birthEventExists = person.events.some(e => e.type === 'birth');
-            if (!birthEventExists) {
+        // Quick-add birth event if checkbox is checked (for new people)
+        // OR if editing and a birthDate was added where there wasn't one before
+        const oldBirthDate = existingPerson?.birthDate;
+        const birthEventExists = person.events.some(e => e.type === 'birth');
+
+        if (personData.birthDate && !birthEventExists) {
+            // For new people, check the checkbox; for existing people, auto-create if they just added a date
+            const shouldCreateBirth = !id
+                ? document.getElementById('createBirthEvent').checked
+                : (!oldBirthDate && personData.birthDate); // Added birth date to existing person
+
+            if (shouldCreateBirth) {
                 this.addEvent(newPersonId, {
                     type: 'birth',
                     date: personData.birthDate,
@@ -2106,10 +2114,17 @@ class FamilyTree {
             }
         }
 
-        // Quick-add death event if checkbox is checked (only for new people with death date)
-        if (!id && document.getElementById('createDeathEvent').checked && personData.deathDate) {
-            const deathEventExists = person.events.some(e => e.type === 'death');
-            if (!deathEventExists) {
+        // Quick-add death event if checkbox is checked (for new people)
+        // OR if editing and a deathDate was added where there wasn't one before
+        const oldDeathDate = existingPerson?.deathDate;
+        const deathEventExists = person.events.some(e => e.type === 'death');
+
+        if (personData.deathDate && !deathEventExists) {
+            const shouldCreateDeath = !id
+                ? document.getElementById('createDeathEvent').checked
+                : (!oldDeathDate && personData.deathDate); // Added death date to existing person
+
+            if (shouldCreateDeath) {
                 this.addEvent(newPersonId, {
                     type: 'death',
                     date: personData.deathDate,
