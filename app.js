@@ -1438,8 +1438,17 @@ class FamilyTree {
         const hasParents = person.fatherId || person.motherId;
         const hasSpouse = person.spouseIds && person.spouseIds.length > 0;
 
+        // Check if person is disconnected (no family connections)
+        const isDisconnected = this.isPersonDisconnected(person);
+        const disconnectedClass = isDisconnected ? ' disconnected' : '';
+
+        // Format birthplace for display
+        const birthplaceHtml = person.birthPlace
+            ? `<div class="birthplace">${person.birthPlace}</div>`
+            : '';
+
         return `
-            <div class="person-card" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
+            <div class="person-card${disconnectedClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
                 <button class="quick-add-btn quick-add-top" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'parent')" title="Add Parent">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1468,8 +1477,19 @@ class FamilyTree {
                 <div class="avatar">${photoHtml}</div>
                 <div class="name">${person.name}</div>
                 <div class="dates">${dates}</div>
+                ${birthplaceHtml}
             </div>
         `;
+    }
+
+    // Check if a person has no family connections
+    isPersonDisconnected(person) {
+        const hasParent = (person.fatherId && this.getPerson(person.fatherId)) ||
+                          (person.motherId && this.getPerson(person.motherId));
+        const hasSpouse = person.spouseIds && person.spouseIds.some(id => this.getPerson(id));
+        const hasChildren = this.getChildren(person.id).length > 0;
+
+        return !hasParent && !hasSpouse && !hasChildren;
     }
 
     renderEmptySlot(generation, child = null, isFatherSlot = true) {
