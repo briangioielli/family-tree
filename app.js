@@ -3076,12 +3076,15 @@ class FamilyTree {
                 e.target.value = '';
             }
         });
-        document.getElementById('gedcomImportInput').addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                this.importGedcom(e.target.files[0]);
-                e.target.value = '';
-            }
-        });
+        const gedcomInput = document.getElementById('gedcomImportInput');
+        if (gedcomInput) {
+            gedcomInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.importGedcom(e.target.files[0]);
+                    e.target.value = '';
+                }
+            });
+        }
         document.getElementById('clearDataBtn').addEventListener('click', () => this.clearAllData());
 
         // Dark mode toggle
