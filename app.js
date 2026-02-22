@@ -9,6 +9,7 @@ class FamilyTree {
         this.firebaseReady = false;
         this.unsubscribe = null; // For real-time listener
         this.currentView = 'portrait'; // 'portrait' or 'landscape'
+        this.focusMode = true; // Start in focus mode by default
 
         // Event type definitions
         this.eventTypes = {
@@ -427,6 +428,94 @@ class FamilyTree {
             ((person.fatherId && p.fatherId === person.fatherId) ||
              (person.motherId && p.motherId === person.motherId))
         );
+    }
+
+    // Get all ancestors of a person (recursive, going up)
+    getAncestors(personId, maxDepth = 15) {
+        const ancestors = [];
+        const visited = new Set();
+
+        const collect = (id, depth) => {
+            if (depth > maxDepth || visited.has(id)) return;
+            visited.add(id);
+
+            const person = this.getPerson(id);
+            if (!person) return;
+
+            if (person.fatherId) {
+                const father = this.getPerson(person.fatherId);
+                if (father) {
+                    ancestors.push(father);
+                    collect(father.id, depth + 1);
+                }
+            }
+            if (person.motherId) {
+                const mother = this.getPerson(person.motherId);
+                if (mother) {
+                    ancestors.push(mother);
+                    collect(mother.id, depth + 1);
+                }
+            }
+        };
+
+        collect(personId, 0);
+        return ancestors;
+    }
+
+    // Get all descendants of a person (recursive, going down)
+    getDescendants(personId, maxDepth = 15) {
+        const descendants = [];
+        const visited = new Set();
+
+        const collect = (id, depth) => {
+            if (depth > maxDepth || visited.has(id)) return;
+            visited.add(id);
+
+            const children = this.getChildren(id);
+            children.forEach(child => {
+                descendants.push(child);
+                collect(child.id, depth + 1);
+            });
+        };
+
+        collect(personId, 0);
+        return descendants;
+    }
+
+    // Get the focused lineage (ancestors + descendants + spouses)
+    getFocusedLineage(personId) {
+        const person = this.getPerson(personId);
+        if (!person) return new Set();
+
+        const lineage = new Set();
+        lineage.add(personId);
+
+        // Add ancestors
+        this.getAncestors(personId).forEach(p => lineage.add(p.id));
+
+        // Add descendants
+        this.getDescendants(personId).forEach(p => lineage.add(p.id));
+
+        // Add spouses of focused person
+        if (person.spouseIds) {
+            person.spouseIds.forEach(id => lineage.add(id));
+        }
+
+        // Add spouses of ancestors (so couples stay together)
+        this.getAncestors(personId).forEach(ancestor => {
+            if (ancestor.spouseIds) {
+                ancestor.spouseIds.forEach(id => lineage.add(id));
+            }
+        });
+
+        // Add spouses of descendants (so couples stay together)
+        this.getDescendants(personId).forEach(descendant => {
+            if (descendant.spouseIds) {
+                descendant.spouseIds.forEach(id => lineage.add(id));
+            }
+        });
+
+        return lineage;
     }
 
     addPerson(personData) {
@@ -956,6 +1045,39 @@ class FamilyTree {
         requestAnimationFrame(() => this.drawConnectorLines());
     }
 
+    // Focus Mode Methods
+    setFocusPerson(personId) {
+        this.focusedPersonId = personId;
+        this.focusMode = true;
+        this.updateFocusIndicator();
+        this.render();
+    }
+
+    setFocusMode(enabled) {
+        this.focusMode = enabled;
+        this.updateFocusIndicator();
+        this.render();
+    }
+
+    updateFocusIndicator() {
+        const indicator = document.getElementById('focusPersonName');
+        const focusBtn = document.getElementById('focusModeBtn');
+        const allBtn = document.getElementById('showAllBtn');
+
+        if (!indicator || !focusBtn || !allBtn) return;
+
+        if (this.focusMode && this.focusedPersonId) {
+            const person = this.getPerson(this.focusedPersonId);
+            indicator.textContent = person ? `${person.name}'s Lineage` : 'Full Tree';
+            focusBtn.classList.add('active');
+            allBtn.classList.remove('active');
+        } else {
+            indicator.textContent = 'Full Tree';
+            focusBtn.classList.remove('active');
+            allBtn.classList.add('active');
+        }
+    }
+
     render() {
         this.renderPedigree();
         // Apply current view class
@@ -1192,12 +1314,15 @@ class FamilyTree {
     renderPedigree() {
         const container = document.getElementById('pedigreeContainer');
 
+        // Update focus indicator
+        this.updateFocusIndicator();
+
         if (this.people.length === 0) {
             container.innerHTML = this.renderEmptyState();
             return;
         }
 
-        // Build a complete family tree showing everyone
+        // Build family tree (filtered in focus mode)
         const generations = this.buildFamilyTree();
 
         console.log('Family tree generations:', generations.length, 'Total people:', this.people.length);
@@ -1237,6 +1362,14 @@ class FamilyTree {
     }
 
     buildFamilyTree() {
+        // Focus Mode: If enabled, only show people in the focused person's lineage
+        const allowedIds = this.focusMode && this.focusedPersonId
+            ? this.getFocusedLineage(this.focusedPersonId)
+            : null;
+
+        // Helper to check if person is allowed (in lineage or focus mode is off)
+        const isAllowed = (person) => !allowedIds || allowedIds.has(person.id);
+
         // Step 1: Find TRUE root ancestors
         // A root is someone who has no parents AND whose spouse (if any) also has no parents
         // This prevents in-laws from appearing at the top level
@@ -1263,6 +1396,9 @@ class FamilyTree {
         };
 
         const rootAncestors = this.people.filter(p => {
+            // In focus mode, must be in the lineage
+            if (!isAllowed(p)) return false;
+
             // Must have no parents
             if (hasParentsInSystem(p)) return false;
 
@@ -1318,6 +1454,7 @@ class FamilyTree {
                 // Find children of anyone in this unit
                 const children = this.people.filter(p =>
                     !allProcessedIds.has(p.id) &&
+                    isAllowed(p) &&
                     ((p.fatherId && parentIds.includes(p.fatherId)) ||
                      (p.motherId && parentIds.includes(p.motherId)))
                 );
@@ -1353,6 +1490,11 @@ class FamilyTree {
         }
 
         // Step 4: Handle anyone not yet in tree (truly disconnected)
+        // Skip this in focus mode - we only want the lineage
+        if (this.focusMode) {
+            return generations;
+        }
+
         const disconnected = this.people.filter(p => !allProcessedIds.has(p.id));
         if (disconnected.length > 0) {
             const disconnectedProcessed = new Set();
@@ -1442,13 +1584,17 @@ class FamilyTree {
         const isDisconnected = this.isPersonDisconnected(person);
         const disconnectedClass = isDisconnected ? ' disconnected' : '';
 
+        // Check if this is the focus root
+        const isFocusRoot = this.focusMode && person.id === this.focusedPersonId;
+        const focusRootClass = isFocusRoot ? ' is-focus-root' : '';
+
         // Format birthplace for display
         const birthplaceHtml = person.birthPlace
             ? `<div class="birthplace">${person.birthPlace}</div>`
             : '';
 
         return `
-            <div class="person-card${disconnectedClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
+            <div class="person-card${disconnectedClass}${focusRootClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
                 <button class="quick-add-btn quick-add-top" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'parent')" title="Add Parent">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1467,6 +1613,12 @@ class FamilyTree {
                     </svg>
                 </button>
                 <div class="card-actions">
+                    <button class="card-action-btn focus-btn" onclick="event.stopPropagation(); app.setFocusPerson('${person.id}')" title="Focus on this person">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                        </svg>
+                    </button>
                     <button class="card-action-btn" onclick="event.stopPropagation(); app.openPersonModal('${person.id}')" title="Edit">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -3031,6 +3183,15 @@ class FamilyTree {
 
         // Back to tree
         document.getElementById('backToTree').addEventListener('click', () => this.hideTimeline());
+
+        // Focus mode toggle
+        document.getElementById('focusModeBtn').addEventListener('click', () => {
+            this.setFocusMode(true);
+        });
+
+        document.getElementById('showAllBtn').addEventListener('click', () => {
+            this.setFocusMode(false);
+        });
 
         // Person modal
         document.getElementById('closeModal').addEventListener('click', () => this.closePersonModal());
