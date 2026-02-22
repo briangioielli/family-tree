@@ -8,6 +8,7 @@ class FamilyTree {
         this.currentYear = new Date().getFullYear();
         this.firebaseReady = false;
         this.unsubscribe = null; // For real-time listener
+        this.currentView = 'portrait'; // 'portrait' or 'landscape'
 
         // Event type definitions
         this.eventTypes = {
@@ -573,6 +574,354 @@ class FamilyTree {
         reader.readAsText(file);
     }
 
+    importGedcom(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const gedcomText = e.target.result;
+                const result = this.parseGedcom(gedcomText);
+
+                if (result.people.length === 0) {
+                    alert('No people found in GEDCOM file.');
+                    return;
+                }
+
+                // Ask user if they want to merge or replace
+                const existingCount = this.people.length;
+                let shouldMerge = false;
+
+                if (existingCount > 0) {
+                    shouldMerge = confirm(
+                        `Found ${result.people.length} people in the GEDCOM file.\n\n` +
+                        `You currently have ${existingCount} people in your tree.\n\n` +
+                        `Click OK to ADD the imported people to your existing tree.\n` +
+                        `Click Cancel to REPLACE your tree with the imported data.`
+                    );
+                }
+
+                if (shouldMerge) {
+                    // Add to existing
+                    result.people.forEach(person => {
+                        this.people.push(person);
+                        this.savePersonToFirebase(person);
+                    });
+                } else {
+                    // Replace - clear existing first
+                    if (existingCount > 0) {
+                        this.people.forEach(p => this.deletePersonFromFirebase(p.id));
+                    }
+                    this.people = result.people;
+                    result.people.forEach(person => this.savePersonToFirebase(person));
+                }
+
+                this.focusedPersonId = this.people.length > 0 ? this.people[0].id : null;
+                this.saveData();
+                this.render();
+                this.closeSettingsModal();
+
+                alert(
+                    `GEDCOM import complete!\n\n` +
+                    `Imported ${result.people.length} people.\n` +
+                    `${result.families} families processed.`
+                );
+            } catch (error) {
+                console.error('GEDCOM import error:', error);
+                alert('Error parsing GEDCOM file. Please make sure it\'s a valid .ged file.');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    parseGedcom(text) {
+        const lines = text.split(/\r?\n/);
+        const individuals = {};
+        const families = {};
+
+        let currentRecord = null;
+        let currentType = null;
+        let currentSubRecord = null;
+
+        // First pass: parse all records
+        for (const line of lines) {
+            const match = line.match(/^(\d+)\s+(@\w+@|\w+)\s*(.*)?$/);
+            if (!match) continue;
+
+            const [, levelStr, tag, value] = match;
+            const level = parseInt(levelStr);
+
+            if (level === 0) {
+                // New record
+                if (tag.startsWith('@') && value === 'INDI') {
+                    currentRecord = { id: tag, events: [] };
+                    currentType = 'INDI';
+                    individuals[tag] = currentRecord;
+                } else if (tag.startsWith('@') && value === 'FAM') {
+                    currentRecord = { id: tag, children: [] };
+                    currentType = 'FAM';
+                    families[tag] = currentRecord;
+                } else {
+                    currentRecord = null;
+                    currentType = null;
+                }
+                currentSubRecord = null;
+            } else if (currentRecord) {
+                if (level === 1) {
+                    currentSubRecord = tag;
+
+                    if (currentType === 'INDI') {
+                        switch (tag) {
+                            case 'NAME':
+                                // Parse name - remove slashes around surname
+                                currentRecord.name = (value || '').replace(/\//g, '').trim();
+                                break;
+                            case 'SEX':
+                                currentRecord.sex = value;
+                                break;
+                            case 'BIRT':
+                            case 'DEAT':
+                            case 'MARR':
+                            case 'BAPM':
+                            case 'BURI':
+                            case 'GRAD':
+                            case 'OCCU':
+                            case 'RESI':
+                            case 'IMMI':
+                            case 'EMIG':
+                            case 'MILI':
+                                currentRecord._currentEvent = { type: tag };
+                                break;
+                            case 'FAMS':
+                                // Spouse family
+                                if (!currentRecord.spouseFamilies) currentRecord.spouseFamilies = [];
+                                currentRecord.spouseFamilies.push(value);
+                                break;
+                            case 'FAMC':
+                                // Child of family
+                                currentRecord.childOfFamily = value;
+                                break;
+                        }
+                    } else if (currentType === 'FAM') {
+                        switch (tag) {
+                            case 'HUSB':
+                                currentRecord.husband = value;
+                                break;
+                            case 'WIFE':
+                                currentRecord.wife = value;
+                                break;
+                            case 'CHIL':
+                                currentRecord.children.push(value);
+                                break;
+                            case 'MARR':
+                                currentRecord._currentEvent = { type: 'MARR' };
+                                break;
+                        }
+                    }
+                } else if (level === 2 && currentRecord._currentEvent) {
+                    // Event details
+                    if (tag === 'DATE') {
+                        currentRecord._currentEvent.date = this.parseGedcomDate(value);
+                    } else if (tag === 'PLAC') {
+                        currentRecord._currentEvent.place = value;
+                    }
+                } else if (level === 2 && currentSubRecord === 'NAME') {
+                    if (tag === 'GIVN') {
+                        currentRecord.givenName = value;
+                    } else if (tag === 'SURN') {
+                        currentRecord.surname = value;
+                    }
+                }
+
+                // Save completed events
+                if (level === 1 && currentRecord._currentEvent && currentRecord._currentEvent.type) {
+                    const evt = currentRecord._currentEvent;
+                    if (evt.type === 'BIRT') {
+                        currentRecord.birthDate = evt.date;
+                        currentRecord.birthPlace = evt.place;
+                    } else if (evt.type === 'DEAT') {
+                        currentRecord.deathDate = evt.date;
+                        currentRecord.deathPlace = evt.place;
+                    } else {
+                        // Add as timeline event
+                        currentRecord.events.push({
+                            gedcomType: evt.type,
+                            date: evt.date,
+                            place: evt.place
+                        });
+                    }
+                    currentRecord._currentEvent = null;
+                }
+            }
+        }
+
+        // Handle last event if file doesn't end with level 0
+        Object.values(individuals).forEach(ind => {
+            if (ind._currentEvent && ind._currentEvent.type) {
+                const evt = ind._currentEvent;
+                if (evt.type === 'BIRT') {
+                    ind.birthDate = evt.date;
+                    ind.birthPlace = evt.place;
+                } else if (evt.type === 'DEAT') {
+                    ind.deathDate = evt.date;
+                    ind.deathPlace = evt.place;
+                }
+            }
+            delete ind._currentEvent;
+        });
+
+        // Second pass: convert to our format and resolve relationships
+        const gedcomIdToNewId = {};
+        const people = [];
+
+        // Create people first
+        Object.values(individuals).forEach(ind => {
+            const newId = this.generateId();
+            gedcomIdToNewId[ind.id] = newId;
+
+            const person = {
+                id: newId,
+                name: ind.name || `${ind.givenName || ''} ${ind.surname || ''}`.trim() || 'Unknown',
+                birthDate: ind.birthDate || null,
+                birthPlace: ind.birthPlace || '',
+                deathDate: ind.deathDate || null,
+                photoUrl: '',
+                biography: '',
+                fatherId: null,
+                motherId: null,
+                spouseIds: [],
+                events: [],
+                documents: []
+            };
+
+            // Convert GEDCOM events to our event types
+            (ind.events || []).forEach(evt => {
+                if (evt.date || evt.place) {
+                    const eventTypeMap = {
+                        'BAPM': 'baptism',
+                        'BURI': 'burial',
+                        'GRAD': 'graduation',
+                        'OCCU': 'occupation',
+                        'RESI': 'residence',
+                        'IMMI': 'immigration',
+                        'EMIG': 'immigration',
+                        'MILI': 'military',
+                        'MARR': 'marriage'
+                    };
+
+                    person.events.push({
+                        id: this.generateId(),
+                        type: eventTypeMap[evt.gedcomType] || 'custom',
+                        date: evt.date || '',
+                        location: evt.place || '',
+                        description: ''
+                    });
+                }
+            });
+
+            // Add birth event if we have birth data
+            if (person.birthDate) {
+                person.events.push({
+                    id: this.generateId(),
+                    type: 'birth',
+                    date: person.birthDate,
+                    location: person.birthPlace || '',
+                    description: ''
+                });
+            }
+
+            // Add death event if we have death data
+            if (person.deathDate) {
+                person.events.push({
+                    id: this.generateId(),
+                    type: 'death',
+                    date: person.deathDate,
+                    location: ind.deathPlace || '',
+                    description: ''
+                });
+            }
+
+            people.push(person);
+            ind._newId = newId;
+        });
+
+        // Resolve family relationships
+        Object.values(families).forEach(fam => {
+            const fatherId = fam.husband ? gedcomIdToNewId[fam.husband] : null;
+            const motherId = fam.wife ? gedcomIdToNewId[fam.wife] : null;
+
+            // Link spouses
+            if (fatherId && motherId) {
+                const father = people.find(p => p.id === fatherId);
+                const mother = people.find(p => p.id === motherId);
+                if (father && !father.spouseIds.includes(motherId)) {
+                    father.spouseIds.push(motherId);
+                }
+                if (mother && !mother.spouseIds.includes(fatherId)) {
+                    mother.spouseIds.push(fatherId);
+                }
+            }
+
+            // Link children to parents
+            fam.children.forEach(childGedcomId => {
+                const childId = gedcomIdToNewId[childGedcomId];
+                const child = people.find(p => p.id === childId);
+                if (child) {
+                    if (fatherId) child.fatherId = fatherId;
+                    if (motherId) child.motherId = motherId;
+                }
+            });
+        });
+
+        return {
+            people,
+            families: Object.keys(families).length
+        };
+    }
+
+    parseGedcomDate(dateStr) {
+        if (!dateStr) return null;
+
+        // Handle various GEDCOM date formats
+        // ABT 1900, BEF 1900, AFT 1900, etc.
+        const cleaned = dateStr
+            .replace(/^(ABT|ABOUT|BEF|BEFORE|AFT|AFTER|EST|CAL|FROM|TO|BET|AND)\s*/gi, '')
+            .trim();
+
+        // Try to parse as "DD MMM YYYY" or "MMM YYYY" or "YYYY"
+        const months = {
+            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+            'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+            'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+        };
+
+        // Full date: "15 MAR 1900"
+        const fullMatch = cleaned.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/i);
+        if (fullMatch) {
+            const [, day, mon, year] = fullMatch;
+            const month = months[mon.toUpperCase()];
+            if (month) {
+                return `${year}-${month}-${day.padStart(2, '0')}`;
+            }
+        }
+
+        // Month and year: "MAR 1900"
+        const monthYearMatch = cleaned.match(/^(\w{3})\s+(\d{4})$/i);
+        if (monthYearMatch) {
+            const [, mon, year] = monthYearMatch;
+            const month = months[mon.toUpperCase()];
+            if (month) {
+                return `${year}-${month}-01`;
+            }
+        }
+
+        // Year only: "1900"
+        const yearMatch = cleaned.match(/^(\d{4})$/);
+        if (yearMatch) {
+            return `${yearMatch[1]}-01-01`;
+        }
+
+        return null;
+    }
+
     async clearAllData() {
         if (confirm('Are you sure you want to delete all data? This cannot be undone.')) {
             // Delete all people from Firebase
@@ -589,8 +938,31 @@ class FamilyTree {
 
     // ==================== Rendering ====================
 
+    setView(view) {
+        this.currentView = view;
+
+        // Update toggle buttons
+        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        // Update tree class
+        const tree = document.querySelector('.pedigree-tree');
+        if (tree) {
+            tree.classList.toggle('landscape', view === 'landscape');
+        }
+
+        // Redraw connectors for new layout
+        requestAnimationFrame(() => this.drawConnectorLines());
+    }
+
     render() {
         this.renderPedigree();
+        // Apply current view class
+        const tree = document.querySelector('.pedigree-tree');
+        if (tree && this.currentView === 'landscape') {
+            tree.classList.add('landscape');
+        }
         // Draw connector lines after DOM is rendered
         requestAnimationFrame(() => this.drawConnectorLines());
     }
@@ -622,8 +994,9 @@ class FamilyTree {
         const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
         const lineColor = isDarkMode ? '#6b7a8a' : '#c4b5a0';
 
+        const isLandscape = this.currentView === 'landscape';
+
         // Draw lines connecting parents to children
-        // For each family unit in a row, find all their children in the next row
         for (let i = 0; i < rows.length - 1; i++) {
             const parentRow = rows[i];
             const childRow = rows[i + 1];
@@ -653,7 +1026,6 @@ class FamilyTree {
                     const child = this.getPerson(childId);
                     if (!child) return;
 
-                    // Check if this child belongs to these parents
                     if ((child.fatherId && parentIds.includes(child.fatherId)) ||
                         (child.motherId && parentIds.includes(child.motherId))) {
                         children.push(childCard);
@@ -662,77 +1034,121 @@ class FamilyTree {
 
                 if (children.length === 0) return;
 
-                // Calculate parent center point
                 const firstParent = parentCards[0];
                 const lastParent = parentCards[parentCards.length - 1];
                 const firstRect = firstParent.getBoundingClientRect();
                 const lastRect = lastParent.getBoundingClientRect();
 
-                const centerX = (firstRect.left + firstRect.width / 2 + lastRect.left + lastRect.width / 2) / 2 - treeRect.left;
-                const topY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
+                if (isLandscape) {
+                    // LANDSCAPE: Lines go left-to-right
+                    const centerY = (firstRect.top + firstRect.height / 2 + lastRect.top + lastRect.height / 2) / 2 - treeRect.top;
+                    const rightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
+                    const midX = rightX + 30;
 
-                // Draw vertical line from parent center down
-                const midY = topY + 30; // How far down to go before branching
+                    // Horizontal line from parent center to the right
+                    const rightLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    rightLine.setAttribute('x1', rightX);
+                    rightLine.setAttribute('y1', centerY);
+                    rightLine.setAttribute('x2', midX);
+                    rightLine.setAttribute('y2', centerY);
+                    rightLine.setAttribute('stroke', lineColor);
+                    rightLine.setAttribute('stroke-width', '2');
+                    svg.appendChild(rightLine);
 
-                const downLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                downLine.setAttribute('x1', centerX);
-                downLine.setAttribute('y1', topY);
-                downLine.setAttribute('x2', centerX);
-                downLine.setAttribute('y2', midY);
-                downLine.setAttribute('stroke', lineColor);
-                downLine.setAttribute('stroke-width', '2');
-                svg.appendChild(downLine);
+                    // Get child positions
+                    const childPositions = children.map(childCard => {
+                        const childRect = childCard.getBoundingClientRect();
+                        return {
+                            x: childRect.left - treeRect.left,
+                            y: childRect.top + childRect.height / 2 - treeRect.top
+                        };
+                    });
 
-                // Get child positions
-                const childPositions = children.map(childCard => {
-                    const childRect = childCard.getBoundingClientRect();
-                    return {
-                        x: childRect.left + childRect.width / 2 - treeRect.left,
-                        y: childRect.top - treeRect.top
-                    };
-                });
+                    if (childPositions.length === 1) {
+                        const child = childPositions[0];
 
-                if (childPositions.length === 1) {
-                    // Single child - just draw a line down
-                    const child = childPositions[0];
+                        if (Math.abs(centerY - child.y) > 2) {
+                            const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            vLine.setAttribute('x1', midX);
+                            vLine.setAttribute('y1', centerY);
+                            vLine.setAttribute('x2', midX);
+                            vLine.setAttribute('y2', child.y);
+                            vLine.setAttribute('stroke', lineColor);
+                            vLine.setAttribute('stroke-width', '2');
+                            svg.appendChild(vLine);
+                        }
 
-                    if (Math.abs(centerX - child.x) > 2) {
-                        // Need horizontal then vertical
-                        const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        hLine.setAttribute('x1', centerX);
-                        hLine.setAttribute('y1', midY);
-                        hLine.setAttribute('x2', child.x);
-                        hLine.setAttribute('y2', midY);
-                        hLine.setAttribute('stroke', lineColor);
-                        hLine.setAttribute('stroke-width', '2');
-                        svg.appendChild(hLine);
+                        const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        toChild.setAttribute('x1', midX);
+                        toChild.setAttribute('y1', child.y);
+                        toChild.setAttribute('x2', child.x);
+                        toChild.setAttribute('y2', child.y);
+                        toChild.setAttribute('stroke', lineColor);
+                        toChild.setAttribute('stroke-width', '2');
+                        svg.appendChild(toChild);
+                    } else {
+                        const minY = Math.min(...childPositions.map(c => c.y));
+                        const maxY = Math.max(...childPositions.map(c => c.y));
+
+                        // Vertical bar connecting all children
+                        const vBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        vBar.setAttribute('x1', midX);
+                        vBar.setAttribute('y1', minY);
+                        vBar.setAttribute('x2', midX);
+                        vBar.setAttribute('y2', maxY);
+                        vBar.setAttribute('stroke', lineColor);
+                        vBar.setAttribute('stroke-width', '2');
+                        svg.appendChild(vBar);
+
+                        // Horizontal lines to each child
+                        childPositions.forEach(child => {
+                            const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            toChild.setAttribute('x1', midX);
+                            toChild.setAttribute('y1', child.y);
+                            toChild.setAttribute('x2', child.x);
+                            toChild.setAttribute('y2', child.y);
+                            toChild.setAttribute('stroke', lineColor);
+                            toChild.setAttribute('stroke-width', '2');
+                            svg.appendChild(toChild);
+                        });
                     }
-
-                    const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    toChild.setAttribute('x1', child.x);
-                    toChild.setAttribute('y1', midY);
-                    toChild.setAttribute('x2', child.x);
-                    toChild.setAttribute('y2', child.y);
-                    toChild.setAttribute('stroke', lineColor);
-                    toChild.setAttribute('stroke-width', '2');
-                    svg.appendChild(toChild);
                 } else {
-                    // Multiple children - draw horizontal bar connecting them all
-                    const minX = Math.min(...childPositions.map(c => c.x));
-                    const maxX = Math.max(...childPositions.map(c => c.x));
+                    // PORTRAIT: Lines go top-to-bottom (original logic)
+                    const centerX = (firstRect.left + firstRect.width / 2 + lastRect.left + lastRect.width / 2) / 2 - treeRect.left;
+                    const topY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
+                    const midY = topY + 30;
 
-                    // Horizontal bar across all children
-                    const hBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    hBar.setAttribute('x1', minX);
-                    hBar.setAttribute('y1', midY);
-                    hBar.setAttribute('x2', maxX);
-                    hBar.setAttribute('y2', midY);
-                    hBar.setAttribute('stroke', lineColor);
-                    hBar.setAttribute('stroke-width', '2');
-                    svg.appendChild(hBar);
+                    const downLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    downLine.setAttribute('x1', centerX);
+                    downLine.setAttribute('y1', topY);
+                    downLine.setAttribute('x2', centerX);
+                    downLine.setAttribute('y2', midY);
+                    downLine.setAttribute('stroke', lineColor);
+                    downLine.setAttribute('stroke-width', '2');
+                    svg.appendChild(downLine);
 
-                    // Vertical lines down to each child
-                    childPositions.forEach(child => {
+                    const childPositions = children.map(childCard => {
+                        const childRect = childCard.getBoundingClientRect();
+                        return {
+                            x: childRect.left + childRect.width / 2 - treeRect.left,
+                            y: childRect.top - treeRect.top
+                        };
+                    });
+
+                    if (childPositions.length === 1) {
+                        const child = childPositions[0];
+
+                        if (Math.abs(centerX - child.x) > 2) {
+                            const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            hLine.setAttribute('x1', centerX);
+                            hLine.setAttribute('y1', midY);
+                            hLine.setAttribute('x2', child.x);
+                            hLine.setAttribute('y2', midY);
+                            hLine.setAttribute('stroke', lineColor);
+                            hLine.setAttribute('stroke-width', '2');
+                            svg.appendChild(hLine);
+                        }
+
                         const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
                         toChild.setAttribute('x1', child.x);
                         toChild.setAttribute('y1', midY);
@@ -741,7 +1157,30 @@ class FamilyTree {
                         toChild.setAttribute('stroke', lineColor);
                         toChild.setAttribute('stroke-width', '2');
                         svg.appendChild(toChild);
-                    });
+                    } else {
+                        const minX = Math.min(...childPositions.map(c => c.x));
+                        const maxX = Math.max(...childPositions.map(c => c.x));
+
+                        const hBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        hBar.setAttribute('x1', minX);
+                        hBar.setAttribute('y1', midY);
+                        hBar.setAttribute('x2', maxX);
+                        hBar.setAttribute('y2', midY);
+                        hBar.setAttribute('stroke', lineColor);
+                        hBar.setAttribute('stroke-width', '2');
+                        svg.appendChild(hBar);
+
+                        childPositions.forEach(child => {
+                            const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            toChild.setAttribute('x1', child.x);
+                            toChild.setAttribute('y1', midY);
+                            toChild.setAttribute('x2', child.x);
+                            toChild.setAttribute('y2', child.y);
+                            toChild.setAttribute('stroke', lineColor);
+                            toChild.setAttribute('stroke-width', '2');
+                            svg.appendChild(toChild);
+                        });
+                    }
                 }
             });
         }
@@ -793,9 +1232,6 @@ class FamilyTree {
         });
 
         html += '</div>';
-
-        // Add a "All People" section below the tree for easy navigation
-        html += this.renderAllPeopleSection();
 
         container.innerHTML = html;
     }
@@ -951,95 +1387,6 @@ class FamilyTree {
         return generations;
     }
 
-
-    renderAllPeopleSection() {
-        if (this.people.length <= 1) return '';
-
-        // Get current sort preference from localStorage
-        const sortBy = localStorage.getItem('allPeopleSortBy') || 'name';
-        const isCollapsed = localStorage.getItem('allPeopleCollapsed') === 'true';
-
-        // Sort people based on preference
-        const sortedPeople = [...this.people].sort((a, b) => {
-            if (sortBy === 'name') {
-                return a.name.localeCompare(b.name);
-            } else if (sortBy === 'birth') {
-                if (!a.birthDate && !b.birthDate) return 0;
-                if (!a.birthDate) return 1;
-                if (!b.birthDate) return -1;
-                return new Date(a.birthDate) - new Date(b.birthDate);
-            } else if (sortBy === 'recent') {
-                // Sort by most recently added (based on id timestamp)
-                const getTimestamp = (id) => {
-                    const match = id.match(/id_(\d+)_/);
-                    return match ? parseInt(match[1]) : 0;
-                };
-                return getTimestamp(b.id) - getTimestamp(a.id);
-            }
-            return 0;
-        });
-
-        let html = `
-            <div class="all-people-section ${isCollapsed ? 'collapsed' : ''}">
-                <div class="all-people-header" onclick="app.toggleAllPeopleSection()">
-                    <div class="all-people-header-left">
-                        <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                        <h3 class="all-people-title">All People (${this.people.length})</h3>
-                    </div>
-                    <div class="all-people-controls" onclick="event.stopPropagation()">
-                        <select class="sort-select" onchange="app.sortAllPeople(this.value)">
-                            <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Name A-Z</option>
-                            <option value="birth" ${sortBy === 'birth' ? 'selected' : ''}>Birth Date</option>
-                            <option value="recent" ${sortBy === 'recent' ? 'selected' : ''}>Recently Added</option>
-                        </select>
-                    </div>
-                </div>
-                <p class="all-people-hint">Click to view timeline</p>
-                <div class="all-people-grid">
-        `;
-
-        sortedPeople.forEach(person => {
-            const initials = this.getInitials(person.name);
-            const dates = this.formatLifeDates(person);
-            const photoHtml = person.photoUrl
-                ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span style="display:none">${initials}</span>`
-                : initials;
-            const isFocused = person.id === this.focusedPersonId;
-
-            html += `
-                <div class="all-people-card ${isFocused ? 'focused' : ''}"
-                     data-person-id="${person.id}"
-                     onclick="app.showTimeline('${person.id}')">
-                    <div class="avatar">${photoHtml}</div>
-                    <div class="all-people-info">
-                        <span class="name">${person.name}</span>
-                        <span class="dates">${dates}</span>
-                    </div>
-                </div>
-            `;
-        });
-
-        html += `
-                </div>
-            </div>
-        `;
-
-        return html;
-    }
-
-    toggleAllPeopleSection() {
-        const isCollapsed = localStorage.getItem('allPeopleCollapsed') === 'true';
-        localStorage.setItem('allPeopleCollapsed', !isCollapsed);
-        this.render();
-    }
-
-    sortAllPeople(sortBy) {
-        localStorage.setItem('allPeopleSortBy', sortBy);
-        this.render();
-    }
-
     renderConnectorRow(parentGen, childGen, genIndex) {
         // Create SVG connectors between parent pairs and their children
         const numParentPairs = parentGen.length / 2;
@@ -1087,8 +1434,29 @@ class FamilyTree {
             ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span style="display:none">${initials}</span>`
             : initials;
 
+        // Determine which quick-add buttons to show
+        const hasParents = person.fatherId || person.motherId;
+        const hasSpouse = person.spouseIds && person.spouseIds.length > 0;
+
         return `
             <div class="person-card" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
+                <button class="quick-add-btn quick-add-top" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'parent')" title="Add Parent">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
+                ${!hasSpouse ? `
+                <button class="quick-add-btn quick-add-right" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'spouse')" title="Add Spouse">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
+                ` : ''}
+                <button class="quick-add-btn quick-add-bottom" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'child')" title="Add Child">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
                 <div class="card-actions">
                     <button class="card-action-btn" onclick="event.stopPropagation(); app.openPersonModal('${person.id}')" title="Edit">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1511,6 +1879,164 @@ class FamilyTree {
         if (overlay) {
             overlay.remove();
         }
+    }
+
+    quickAddRelative(personId, relationshipType) {
+        // Map generic types to specific relationship types
+        if (relationshipType === 'parent') {
+            // Ask which parent type
+            const person = this.getPerson(personId);
+            if (!person.fatherId && !person.motherId) {
+                // No parents yet - show choice
+                this.showParentTypeChoice(personId);
+            } else if (!person.fatherId) {
+                this.openAddFamilyMemberModal('father', personId);
+            } else if (!person.motherId) {
+                this.openAddFamilyMemberModal('mother', personId);
+            } else {
+                alert('This person already has both parents assigned.');
+            }
+        } else if (relationshipType === 'spouse') {
+            this.openAddFamilyMemberModal('spouse', personId);
+        } else if (relationshipType === 'child') {
+            this.openAddChildModal(personId);
+        }
+    }
+
+    showParentTypeChoice(personId) {
+        const person = this.getPerson(personId);
+        const overlay = document.createElement('div');
+        overlay.id = 'parentTypeOverlay';
+        overlay.className = 'modal-overlay active';
+        overlay.innerHTML = `
+            <div class="modal">
+                <div class="link-choice-modal">
+                    <h3>Add Parent for ${person.name.split(' ')[0]}</h3>
+                    <div class="link-choice-options" style="flex-direction: row; gap: 12px;">
+                        <button class="btn btn-primary" onclick="app.closeParentTypeChoice(); app.openAddFamilyMemberModal('father', '${personId}')">
+                            Add Father
+                        </button>
+                        <button class="btn btn-primary" onclick="app.closeParentTypeChoice(); app.openAddFamilyMemberModal('mother', '${personId}')">
+                            Add Mother
+                        </button>
+                    </div>
+                    <button class="btn btn-text link-choice-cancel" onclick="app.closeParentTypeChoice()">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeParentTypeChoice();
+        });
+    }
+
+    closeParentTypeChoice() {
+        const overlay = document.getElementById('parentTypeOverlay');
+        if (overlay) overlay.remove();
+    }
+
+    openAddChildModal(personId) {
+        const person = this.getPerson(personId);
+
+        // Get potential children (people not already linked as children)
+        const existingChildIds = this.people
+            .filter(p => p.fatherId === personId || p.motherId === personId)
+            .map(p => p.id);
+
+        let availablePeople = this.people.filter(p =>
+            p.id !== personId &&
+            !existingChildIds.includes(p.id) &&
+            !person.spouseIds?.includes(p.id)
+        );
+
+        const choiceHtml = `
+            <div class="link-choice-modal">
+                <h3>Add Child for ${person.name.split(' ')[0]}</h3>
+                <div class="link-choice-options">
+                    ${availablePeople.length > 0 ? `
+                    <div class="link-choice-section">
+                        <h4>Link Existing Person</h4>
+                        <select id="linkExistingChild" class="link-person-select">
+                            <option value="">-- Select a person --</option>
+                            ${availablePeople.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-primary" onclick="app.linkExistingChild('${personId}')">Link as Child</button>
+                    </div>
+                    <div class="link-choice-divider">
+                        <span>OR</span>
+                    </div>
+                    ` : ''}
+                    <div class="link-choice-section">
+                        <h4>Create New Person</h4>
+                        <button class="btn btn-secondary" onclick="app.createNewChild('${personId}')">Create New Child</button>
+                    </div>
+                </div>
+                <button class="btn btn-text link-choice-cancel" onclick="app.closeAddChildModal()">Cancel</button>
+            </div>
+        `;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'addChildOverlay';
+        overlay.className = 'modal-overlay active';
+        overlay.innerHTML = `<div class="modal">${choiceHtml}</div>`;
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeAddChildModal();
+        });
+    }
+
+    closeAddChildModal() {
+        const overlay = document.getElementById('addChildOverlay');
+        if (overlay) overlay.remove();
+    }
+
+    linkExistingChild(parentId) {
+        const selectedId = document.getElementById('linkExistingChild').value;
+        if (!selectedId) {
+            alert('Please select a person to link.');
+            return;
+        }
+
+        const parent = this.getPerson(parentId);
+        const child = this.getPerson(selectedId);
+
+        // Determine if this parent is father or mother based on existing data or spouse
+        // For simplicity, check if the parent has a spouse and assign accordingly
+        // Or just ask...
+        const isFather = !child.fatherId;
+
+        if (isFather) {
+            child.fatherId = parentId;
+        } else {
+            child.motherId = parentId;
+        }
+
+        this.updatePerson(selectedId, child);
+        this.closeAddChildModal();
+        this.render();
+    }
+
+    createNewChild(parentId) {
+        this.closeAddChildModal();
+        this.openPersonModal(null);
+
+        // Set the parent after the modal opens
+        setTimeout(() => {
+            const parent = this.getPerson(parentId);
+            // If parent has a spouse, pre-fill both parents
+            if (parent.spouseIds && parent.spouseIds.length > 0) {
+                const spouseId = parent.spouseIds[0];
+                const spouse = this.getPerson(spouseId);
+
+                // Determine which is father/mother (basic heuristic)
+                document.getElementById('fatherId').value = parentId;
+                document.getElementById('motherId').value = spouseId;
+            } else {
+                // Just set this person as a parent
+                document.getElementById('fatherId').value = parentId;
+            }
+        }, 100);
     }
 
     linkExistingPerson(type, personId) {
@@ -2475,6 +3001,14 @@ class FamilyTree {
         document.getElementById('addPersonBtn').addEventListener('click', () => this.openPersonModal());
         document.getElementById('settingsBtn').addEventListener('click', () => this.openSettingsModal());
 
+        // View toggle
+        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const view = e.currentTarget.dataset.view;
+                this.setView(view);
+            });
+        });
+
         // Back to tree
         document.getElementById('backToTree').addEventListener('click', () => this.hideTimeline());
 
@@ -2539,6 +3073,12 @@ class FamilyTree {
         document.getElementById('importDataInput').addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 this.importData(e.target.files[0]);
+                e.target.value = '';
+            }
+        });
+        document.getElementById('gedcomImportInput').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                this.importGedcom(e.target.files[0]);
                 e.target.value = '';
             }
         });
