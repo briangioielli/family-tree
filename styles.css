@@ -56,6 +56,10 @@
     --radius-xl: 20px;
     --radius-full: 9999px;
 
+    /* Typography */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-serif: 'Lora', Georgia, 'Times New Roman', serif;
+
     /* Transitions */
     --transition-fast: 150ms ease;
     --transition: 200ms ease;
@@ -126,11 +130,6 @@
     background: linear-gradient(145deg, var(--primary-light), #364555);
 }
 
-[data-theme="dark"] .person-card[data-has-children="true"]::after,
-[data-theme="dark"] .person-card[data-has-parents="true"]::before {
-    background: #6b7a8a;
-}
-
 [data-theme="dark"] .timeline-track {
     background: linear-gradient(90deg,
         var(--border) 0%,
@@ -144,6 +143,40 @@
 [data-theme="dark"] .pedigree-connectors line,
 [data-theme="dark"] .pedigree-connectors path {
     stroke: #6b7a8a !important;
+}
+
+[data-theme="dark"] .person-hero-avatar {
+    background: linear-gradient(145deg, var(--primary-light), #364555);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .person-biography-text {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .story-card-content {
+    background: var(--surface);
+}
+
+[data-theme="dark"] .vertical-timeline-cards::before {
+    background: var(--border);
+}
+
+[data-theme="dark"] .story-card-dot {
+    border-color: var(--surface);
+}
+
+[data-theme="dark"] .story-audio-section {
+    background: var(--surface-elevated);
+    border-color: var(--border);
+}
+
+[data-theme="dark"] .audio-waveform {
+    background: var(--border);
+}
+
+[data-theme="dark"] .story-card-action {
+    background: var(--surface-elevated);
 }
 
 [data-theme="dark"] .spouse-connector {
@@ -578,7 +611,7 @@ body {
     justify-content: center;
     gap: 40px;
     position: relative;
-    padding: 20px 0;
+    padding: 40px 0;
     flex-wrap: wrap;
 }
 
@@ -707,30 +740,6 @@ body {
 
 .person-card:hover::before {
     width: 60px;
-    opacity: 1;
-}
-
-/* Connection stems for parent-child lines */
-.person-card[data-has-children="true"]::after {
-    content: '';
-    position: absolute;
-    bottom: -12px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    height: 12px;
-    background: #c4b5a0;
-    z-index: -1;
-}
-
-.person-card[data-has-parents="true"]::before {
-    top: -12px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    height: 12px;
-    background: #c4b5a0;
-    border-radius: 0;
     opacity: 1;
 }
 
@@ -1090,6 +1099,168 @@ body {
     display: flex;
     gap: 10px;
     margin-top: 16px;
+}
+
+/* ==================== Person Hero Section ==================== */
+.person-hero {
+    position: relative;
+    min-height: 320px;
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.person-hero-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+}
+
+.person-hero-bg img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(20px) brightness(0.8);
+    transform: scale(1.1);
+}
+
+.person-hero-bg .hero-gradient-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg,
+        rgba(45, 52, 54, 0.4) 0%,
+        rgba(45, 52, 54, 0.7) 60%,
+        rgba(45, 52, 54, 0.85) 100%
+    );
+}
+
+.person-hero-bg.no-photo .hero-gradient-overlay {
+    background: linear-gradient(135deg,
+        #5b7a9d 0%,
+        #4a6785 30%,
+        #6b8cae 60%,
+        #c9a66b 100%
+    );
+}
+
+.person-hero-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 48px 32px 40px;
+    width: 100%;
+}
+
+.person-hero-avatar {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, var(--primary-light), #d4dce4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    font-weight: 500;
+    color: var(--primary);
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    border: 4px solid rgba(255, 255, 255, 0.9);
+    margin-bottom: 20px;
+}
+
+.person-hero-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.person-hero-avatar .hero-initials {
+    color: var(--primary);
+    font-size: 2.5rem;
+    font-weight: 500;
+    letter-spacing: 0.025em;
+}
+
+.person-hero-name {
+    font-family: var(--font-serif);
+    font-size: 2.25rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.person-hero-dates {
+    font-size: 1.05rem;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 4px;
+    font-weight: 400;
+}
+
+.person-hero-birthplace {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.65);
+    font-style: italic;
+    margin-bottom: 20px;
+}
+
+.person-hero-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-hero {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    backdrop-filter: blur(8px);
+    transition: var(--transition);
+}
+
+.btn-hero:hover {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+.btn-hero svg {
+    width: 14px;
+    height: 14px;
+}
+
+.btn-hero-danger:hover {
+    background: rgba(192, 105, 92, 0.6);
+    border-color: rgba(192, 105, 92, 0.5);
+}
+
+/* Person Biography Section */
+.person-biography-section {
+    max-width: 720px;
+    margin: 0 auto 32px;
+    padding: 0 16px;
+}
+
+.person-biography-text {
+    font-family: var(--font-serif);
+    font-size: 1.05rem;
+    line-height: 1.85;
+    color: var(--text-secondary);
+    font-style: italic;
+    text-align: center;
 }
 
 /* Person Documents Section */
@@ -1764,6 +1935,332 @@ body {
     color: white;
 }
 
+/* ==================== Vertical Story-Card Timeline ==================== */
+.vertical-timeline {
+    position: relative;
+    padding: 0 0 40px;
+}
+
+.vertical-timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    padding: 0 8px;
+}
+
+.vertical-timeline-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.vertical-timeline-title svg {
+    color: var(--text-muted);
+}
+
+.timeline-lifespan {
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+    margin-left: 4px;
+}
+
+.vertical-timeline-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    position: relative;
+    padding-left: 8px;
+}
+
+/* Connecting line behind all cards */
+.vertical-timeline-cards::before {
+    content: '';
+    position: absolute;
+    left: 27px;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--border);
+    border-radius: 1px;
+}
+
+/* Story Card */
+.story-card {
+    display: flex;
+    gap: 16px;
+    position: relative;
+}
+
+.story-card-marker {
+    flex-shrink: 0;
+    width: 40px;
+    display: flex;
+    justify-content: center;
+    padding-top: 22px;
+    z-index: 2;
+}
+
+.story-card-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 3px solid var(--surface);
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+}
+
+.story-card-content {
+    flex: 1;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    padding: 20px 20px 16px 24px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: var(--shadow-sm);
+}
+
+.story-card-content:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.story-card-accent {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+}
+
+.story-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.story-card-type {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+}
+
+.story-card-date {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.story-card-title {
+    font-family: var(--font-serif);
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.story-card-location {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.story-card-location svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.story-card-description {
+    font-family: var(--font-serif);
+    font-size: 0.9rem;
+    line-height: 1.75;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.story-card-photos {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.story-card-photo {
+    width: 88px;
+    height: 66px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.story-card-photo:hover {
+    border-color: var(--primary);
+    transform: scale(1.05);
+}
+
+.story-card-photos-more {
+    display: flex;
+    align-items: center;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0 8px;
+}
+
+.story-card-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.story-card-content:hover .story-card-actions {
+    opacity: 1;
+}
+
+.story-card-action {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--background);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: var(--transition-fast);
+}
+
+.story-card-action svg {
+    width: 14px;
+    height: 14px;
+}
+
+.story-card-action:hover {
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+.story-card-action-delete:hover {
+    background: rgba(192, 105, 92, 0.1);
+    color: var(--danger);
+}
+
+/* ==================== Audio Story Player ==================== */
+.story-audio-section {
+    margin-top: 12px;
+    padding: 16px;
+    background: var(--background-warm);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-light);
+}
+
+.story-audio-photo {
+    width: 100%;
+    max-height: 200px;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.story-audio-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.story-audio-player {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.audio-play-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: var(--primary);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: var(--transition);
+}
+
+.audio-play-btn:hover {
+    background: var(--primary-hover);
+    transform: scale(1.05);
+}
+
+.audio-play-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.audio-waveform {
+    flex: 1;
+    height: 32px;
+    background: var(--border-light);
+    border-radius: 16px;
+    position: relative;
+    overflow: hidden;
+}
+
+.audio-progress {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: var(--primary);
+    opacity: 0.2;
+    border-radius: 16px;
+    transition: width 0.1s linear;
+}
+
+.audio-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.story-audio-credits {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--text-secondary);
+    font-family: var(--font-serif);
+}
+
 /* Event Detail Modal */
 .event-detail-header {
     display: flex;
@@ -1828,8 +2325,9 @@ body {
 }
 
 .event-detail-description p {
+    font-family: var(--font-serif);
     font-size: 0.95rem;
-    line-height: 1.7;
+    line-height: 1.8;
     color: var(--text-secondary);
     white-space: pre-wrap;
 }
@@ -2161,14 +2659,17 @@ body {
 }
 
 .photo-gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    display: flex;
     gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 8px;
 }
 
 .gallery-photo {
     position: relative;
-    aspect-ratio: 1;
+    width: 180px;
+    height: 140px;
+    flex-shrink: 0;
     border-radius: var(--radius);
     overflow: hidden;
     cursor: pointer;
@@ -2524,6 +3025,105 @@ body {
     letter-spacing: 0.05em;
 }
 
+/* Audio Story Form Section */
+.audio-upload-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.audio-upload-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.audio-upload-status {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.upload-progress {
+    color: var(--primary);
+    font-style: italic;
+}
+
+.upload-complete {
+    color: var(--success);
+}
+
+.upload-error {
+    color: var(--danger);
+}
+
+.btn-remove-upload {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0 4px;
+    line-height: 1;
+    transition: var(--transition-fast);
+}
+
+.btn-remove-upload:hover {
+    color: var(--danger);
+}
+
+.story-photo-upload-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.form-or {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.story-photo-preview {
+    margin-top: 8px;
+    position: relative;
+    display: inline-block;
+}
+
+.story-photo-preview img {
+    max-width: 200px;
+    max-height: 140px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    object-fit: cover;
+}
+
+.story-photo-preview .btn-remove-upload {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
 .form-group {
     margin-bottom: 16px;
 }
@@ -2874,6 +3474,64 @@ body {
 
     .timeline-popup {
         width: 240px;
+    }
+
+    /* Hero responsive */
+    .person-hero {
+        min-height: 260px;
+    }
+
+    .person-hero-content {
+        padding: 32px 20px 28px;
+    }
+
+    .person-hero-avatar {
+        width: 100px;
+        height: 100px;
+        font-size: 2rem;
+    }
+
+    .person-hero-avatar .hero-initials {
+        font-size: 2rem;
+    }
+
+    .person-hero-name {
+        font-size: 1.6rem;
+    }
+
+    .person-hero-dates {
+        font-size: 0.9rem;
+    }
+
+    /* Vertical timeline responsive */
+    .vertical-timeline-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .vertical-timeline-cards {
+        padding-left: 0;
+    }
+
+    .vertical-timeline-cards::before {
+        left: 19px;
+    }
+
+    .story-card-marker {
+        width: 32px;
+    }
+
+    .story-card-content {
+        padding: 16px 16px 12px 20px;
+    }
+
+    .story-card-actions {
+        opacity: 1;
+    }
+
+    .story-card-title {
+        font-size: 1rem;
     }
 }
 

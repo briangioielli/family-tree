@@ -7,12 +7,13 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
 
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-app.js";
         import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-firestore.js";
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDPQ6vtC5kjNPKbaWLmCIMSbH0dGzhSiZk",
@@ -25,6 +26,7 @@
 
         const firebaseApp = initializeApp(firebaseConfig);
         const db = getFirestore(firebaseApp);
+        const storage = getStorage(firebaseApp);
 
         // Make Firebase available globally for app.js
         window.firebaseDb = db;
@@ -34,6 +36,10 @@
         window.firebaseSetDoc = setDoc;
         window.firebaseDeleteDoc = deleteDoc;
         window.firebaseOnSnapshot = onSnapshot;
+        window.firebaseStorage = storage;
+        window.firebaseStorageRef = storageRef;
+        window.firebaseUploadBytes = uploadBytes;
+        window.firebaseGetDownloadURL = getDownloadURL;
 
         // Signal that Firebase is ready
         window.dispatchEvent(new Event('firebase-ready'));
@@ -363,6 +369,50 @@
                             <input type="text" id="docUrl" placeholder="Paste image/document URL">
                             <input type="text" id="docLabel" placeholder="Label">
                             <button type="button" class="btn btn-small" id="addDocBtn">Add</button>
+                        </div>
+                    </div>
+
+                    <div class="form-section audio-story-form-section">
+                        <h3>Audio Story</h3>
+                        <div class="form-group">
+                            <label>Audio Recording</label>
+                            <span class="form-hint">Upload an mp3 or m4a file of an oral history or story</span>
+                            <div class="audio-upload-container">
+                                <label class="btn btn-small btn-secondary audio-upload-label">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    Upload Audio
+                                    <input type="file" id="eventAudioFile" accept=".mp3,.m4a,audio/mpeg,audio/mp4" hidden>
+                                </label>
+                                <div class="audio-upload-status" id="audioUploadStatus"></div>
+                            </div>
+                            <input type="hidden" id="eventAudioUrl">
+                        </div>
+                        <div class="form-group">
+                            <label>Story Cover Photo</label>
+                            <span class="form-hint">A photo to display with this audio story</span>
+                            <div class="story-photo-upload-container">
+                                <label class="btn btn-small btn-secondary">
+                                    Upload Photo
+                                    <input type="file" id="eventStoryPhotoFile" accept="image/*" hidden>
+                                </label>
+                                <span class="form-or">or</span>
+                                <input type="text" id="eventStoryPhotoUrl" placeholder="Paste image URL">
+                            </div>
+                            <div class="story-photo-preview" id="storyPhotoPreview"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="eventAudioToldBy">Told By</label>
+                                <input type="text" id="eventAudioToldBy" placeholder="e.g., Deb Gioielli">
+                            </div>
+                            <div class="form-group">
+                                <label for="eventAudioRecordedBy">Recorded By</label>
+                                <input type="text" id="eventAudioRecordedBy" placeholder="e.g., Olive Gioielli">
+                            </div>
                         </div>
                     </div>
 

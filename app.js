@@ -10,6 +10,7 @@ class FamilyTree {
         this.unsubscribe = null; // For real-time listener
         this.currentView = 'portrait'; // 'portrait' or 'landscape'
         this.focusMode = true; // Start in focus mode by default
+        this.currentAudio = null; // For audio story playback
 
         // Event type definitions
         this.eventTypes = {
@@ -1114,7 +1115,7 @@ class FamilyTree {
 
         // Get connector color based on theme
         const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-        const lineColor = isDarkMode ? '#6b7a8a' : '#c4b5a0';
+        const lineColor = isDarkMode ? '#6b7a8a' : '#c8bfb3';
 
         const isLandscape = this.currentView === 'landscape';
 
@@ -1161,23 +1162,39 @@ class FamilyTree {
                 const firstRect = firstParent.getBoundingClientRect();
                 const lastRect = lastParent.getBoundingClientRect();
 
+                // Helper to create SVG line
+                const addLine = (x1, y1, x2, y2) => {
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', x1);
+                    line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2);
+                    line.setAttribute('y2', y2);
+                    line.setAttribute('stroke', lineColor);
+                    line.setAttribute('stroke-width', '2.5');
+                    line.setAttribute('stroke-linecap', 'round');
+                    svg.appendChild(line);
+                };
+
+                // Helper to add junction dot
+                const addDot = (cx, cy) => {
+                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    dot.setAttribute('cx', cx);
+                    dot.setAttribute('cy', cy);
+                    dot.setAttribute('r', '3.5');
+                    dot.setAttribute('fill', lineColor);
+                    svg.appendChild(dot);
+                };
+
                 if (isLandscape) {
-                    // LANDSCAPE: Lines go left-to-right
-                    const centerY = (firstRect.top + firstRect.height / 2 + lastRect.top + lastRect.height / 2) / 2 - treeRect.top;
-                    const rightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
-                    const midX = rightX + 30;
+                    // LANDSCAPE: Lines go left-to-right (redesigned)
+                    const coupleCenterY = (
+                        (firstRect.top + firstRect.height / 2) +
+                        (lastRect.top + lastRect.height / 2)
+                    ) / 2 - treeRect.top;
 
-                    // Horizontal line from parent center to the right
-                    const rightLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    rightLine.setAttribute('x1', rightX);
-                    rightLine.setAttribute('y1', centerY);
-                    rightLine.setAttribute('x2', midX);
-                    rightLine.setAttribute('y2', centerY);
-                    rightLine.setAttribute('stroke', lineColor);
-                    rightLine.setAttribute('stroke-width', '2');
-                    svg.appendChild(rightLine);
+                    const parentRightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
 
-                    // Get child positions
+                    // Get child positions (left edge, vertical center)
                     const childPositions = children.map(childCard => {
                         const childRect = childCard.getBoundingClientRect();
                         return {
@@ -1186,68 +1203,48 @@ class FamilyTree {
                         };
                     });
 
+                    // Calculate midX as actual midpoint between parent right and child left
+                    const closestChildX = Math.min(...childPositions.map(c => c.x));
+                    const midX = parentRightX + (closestChildX - parentRightX) / 2;
+
+                    // 1. Couple extend-line (parent right → midX)
+                    addLine(parentRightX, coupleCenterY, midX, coupleCenterY);
+
                     if (childPositions.length === 1) {
                         const child = childPositions[0];
-
-                        if (Math.abs(centerY - child.y) > 2) {
-                            const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            vLine.setAttribute('x1', midX);
-                            vLine.setAttribute('y1', centerY);
-                            vLine.setAttribute('x2', midX);
-                            vLine.setAttribute('y2', child.y);
-                            vLine.setAttribute('stroke', lineColor);
-                            vLine.setAttribute('stroke-width', '2');
-                            svg.appendChild(vLine);
+                        if (Math.abs(coupleCenterY - child.y) < 2) {
+                            // Straight across to child
+                            addLine(midX, coupleCenterY, child.x, child.y);
+                        } else {
+                            // L-shape: vertical jog at midX, then across to child
+                            addLine(midX, coupleCenterY, midX, child.y);
+                            addLine(midX, child.y, child.x, child.y);
+                            addDot(midX, coupleCenterY);
+                            addDot(midX, child.y);
                         }
-
-                        const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        toChild.setAttribute('x1', midX);
-                        toChild.setAttribute('y1', child.y);
-                        toChild.setAttribute('x2', child.x);
-                        toChild.setAttribute('y2', child.y);
-                        toChild.setAttribute('stroke', lineColor);
-                        toChild.setAttribute('stroke-width', '2');
-                        svg.appendChild(toChild);
                     } else {
+                        // 2. Vertical distribution bar
                         const minY = Math.min(...childPositions.map(c => c.y));
                         const maxY = Math.max(...childPositions.map(c => c.y));
+                        addLine(midX, minY, midX, maxY);
 
-                        // Vertical bar connecting all children
-                        const vBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        vBar.setAttribute('x1', midX);
-                        vBar.setAttribute('y1', minY);
-                        vBar.setAttribute('x2', midX);
-                        vBar.setAttribute('y2', maxY);
-                        vBar.setAttribute('stroke', lineColor);
-                        vBar.setAttribute('stroke-width', '2');
-                        svg.appendChild(vBar);
-
-                        // Horizontal lines to each child
+                        // 3. Child branch-lines (midX → each child left)
                         childPositions.forEach(child => {
-                            const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            toChild.setAttribute('x1', midX);
-                            toChild.setAttribute('y1', child.y);
-                            toChild.setAttribute('x2', child.x);
-                            toChild.setAttribute('y2', child.y);
-                            toChild.setAttribute('stroke', lineColor);
-                            toChild.setAttribute('stroke-width', '2');
-                            svg.appendChild(toChild);
+                            addLine(midX, child.y, child.x, child.y);
                         });
+
+                        // 4. Junction dots
+                        addDot(midX, coupleCenterY);
+                        childPositions.forEach(child => addDot(midX, child.y));
                     }
                 } else {
-                    // PORTRAIT: Lines go top-to-bottom (original logic)
-                    const centerX = (firstRect.left + firstRect.width / 2 + lastRect.left + lastRect.width / 2) / 2 - treeRect.left;
-                    const topY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
-                    const midY = topY + 30;
+                    // PORTRAIT: Lines go top-to-bottom (redesigned)
+                    const coupleCenterX = (
+                        (firstRect.left + firstRect.width / 2) +
+                        (lastRect.left + lastRect.width / 2)
+                    ) / 2 - treeRect.left;
 
-                    const downLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    downLine.setAttribute('x1', centerX);
-                    downLine.setAttribute('y1', topY);
-                    downLine.setAttribute('x2', centerX);
-                    downLine.setAttribute('y2', midY);
-                    downLine.setAttribute('stroke', lineColor);
-                    downLine.setAttribute('stroke-width', '2');
-                    svg.appendChild(downLine);
+                    const parentBottomY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
 
                     const childPositions = children.map(childCard => {
                         const childRect = childCard.getBoundingClientRect();
@@ -1257,51 +1254,39 @@ class FamilyTree {
                         };
                     });
 
+                    // Calculate midY as actual midpoint between parent bottom and child top
+                    const topChildY = Math.min(...childPositions.map(c => c.y));
+                    const midY = parentBottomY + (topChildY - parentBottomY) / 2;
+
+                    // 1. Couple drop-line (parent bottom → midY)
+                    addLine(coupleCenterX, parentBottomY, coupleCenterX, midY);
+
                     if (childPositions.length === 1) {
                         const child = childPositions[0];
-
-                        if (Math.abs(centerX - child.x) > 2) {
-                            const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            hLine.setAttribute('x1', centerX);
-                            hLine.setAttribute('y1', midY);
-                            hLine.setAttribute('x2', child.x);
-                            hLine.setAttribute('y2', midY);
-                            hLine.setAttribute('stroke', lineColor);
-                            hLine.setAttribute('stroke-width', '2');
-                            svg.appendChild(hLine);
+                        if (Math.abs(coupleCenterX - child.x) < 2) {
+                            // Straight down to child
+                            addLine(coupleCenterX, midY, child.x, child.y);
+                        } else {
+                            // L-shape: horizontal jog at midY, then down to child
+                            addLine(coupleCenterX, midY, child.x, midY);
+                            addLine(child.x, midY, child.x, child.y);
+                            addDot(coupleCenterX, midY);
+                            addDot(child.x, midY);
                         }
-
-                        const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        toChild.setAttribute('x1', child.x);
-                        toChild.setAttribute('y1', midY);
-                        toChild.setAttribute('x2', child.x);
-                        toChild.setAttribute('y2', child.y);
-                        toChild.setAttribute('stroke', lineColor);
-                        toChild.setAttribute('stroke-width', '2');
-                        svg.appendChild(toChild);
                     } else {
+                        // 2. Horizontal distribution bar
                         const minX = Math.min(...childPositions.map(c => c.x));
                         const maxX = Math.max(...childPositions.map(c => c.x));
+                        addLine(minX, midY, maxX, midY);
 
-                        const hBar = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                        hBar.setAttribute('x1', minX);
-                        hBar.setAttribute('y1', midY);
-                        hBar.setAttribute('x2', maxX);
-                        hBar.setAttribute('y2', midY);
-                        hBar.setAttribute('stroke', lineColor);
-                        hBar.setAttribute('stroke-width', '2');
-                        svg.appendChild(hBar);
-
+                        // 3. Child rise-lines (midY → each child top)
                         childPositions.forEach(child => {
-                            const toChild = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                            toChild.setAttribute('x1', child.x);
-                            toChild.setAttribute('y1', midY);
-                            toChild.setAttribute('x2', child.x);
-                            toChild.setAttribute('y2', child.y);
-                            toChild.setAttribute('stroke', lineColor);
-                            toChild.setAttribute('stroke-width', '2');
-                            svg.appendChild(toChild);
+                            addLine(child.x, midY, child.x, child.y);
                         });
+
+                        // 4. Junction dots
+                        addDot(coupleCenterX, midY);
+                        childPositions.forEach(child => addDot(child.x, midY));
                     }
                 }
             });
@@ -1916,35 +1901,54 @@ class FamilyTree {
             `;
         }
 
+        // Hero background: blurred photo or warm gradient
+        const heroBgHtml = person.photoUrl
+            ? `<div class="person-hero-bg">
+                    <img src="${person.photoUrl}" alt="" onerror="this.parentElement.classList.add('no-photo')">
+                    <div class="hero-gradient-overlay"></div>
+               </div>`
+            : `<div class="person-hero-bg no-photo">
+                    <div class="hero-gradient-overlay"></div>
+               </div>`;
+
+        // Hero avatar (larger version)
+        const heroAvatarHtml = person.photoUrl
+            ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span class="hero-initials" style="display:none">${initials}</span>`
+            : `<span class="hero-initials">${initials}</span>`;
+
         container.innerHTML = `
-            <div class="person-header-content">
-                <div class="avatar">${photoHtml}</div>
-                <div class="person-header-info">
-                    <h1 class="name">${person.name}</h1>
-                    <p class="life-dates">${dates}${person.birthPlace ? ` · ${person.birthPlace}` : ''}</p>
-                    ${person.biography ? `<p class="biography">${person.biography}</p>` : ''}
-                    <div class="person-header-actions">
-                        <button class="btn btn-secondary" onclick="app.openPersonModal('${person.id}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+            <div class="person-hero">
+                ${heroBgHtml}
+                <div class="person-hero-content">
+                    <div class="person-hero-avatar">${heroAvatarHtml}</div>
+                    <h1 class="person-hero-name">${person.name}</h1>
+                    ${dates ? `<p class="person-hero-dates">${dates}</p>` : ''}
+                    ${person.birthPlace ? `<p class="person-hero-birthplace">${person.birthPlace}</p>` : ''}
+                    <div class="person-hero-actions">
+                        <button class="btn-hero" onclick="app.openPersonModal('${person.id}')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
                             Edit
                         </button>
-                        <button class="btn btn-danger" onclick="app.confirmDeletePerson('${person.id}', '${person.name.replace(/'/g, "\\'")}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                        <button class="btn-hero btn-hero-danger" onclick="app.confirmDeletePerson('${person.id}', '${person.name.replace(/'/g, "\\'")}')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="3 6 5 6 21 6"/>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                <line x1="10" y1="11" x2="10" y2="17"/>
-                                <line x1="14" y1="11" x2="14" y2="17"/>
                             </svg>
                             Delete
                         </button>
                     </div>
                 </div>
             </div>
-            ${documentsHtml}
+            ${person.biography ? `
+                <div class="person-biography-section">
+                    <p class="person-biography-text">${person.biography}</p>
+                </div>
+            ` : ''}
             ${familySectionHtml}
+            ${documentsHtml}
         `;
     }
 
@@ -2310,94 +2314,114 @@ class FamilyTree {
             return;
         }
 
-        // Calculate year range for markers
-        const years = sortedEvents
-            .filter(e => e.date)
-            .map(e => new Date(e.date).getFullYear());
-        const minYear = Math.min(...years);
-        const maxYear = Math.max(...years);
         const lifespan = person.birthDate && person.deathDate
-            ? `${new Date(person.birthDate).getFullYear()} - ${new Date(person.deathDate).getFullYear()}`
+            ? `${new Date(person.birthDate).getFullYear()} \u2013 ${new Date(person.deathDate).getFullYear()}`
             : person.birthDate
                 ? `Born ${new Date(person.birthDate).getFullYear()}`
                 : '';
 
-        // Generate year markers (every 10 years, or fewer if lifespan is short)
-        const yearRange = maxYear - minYear;
-        const yearStep = yearRange > 50 ? 20 : yearRange > 20 ? 10 : 5;
-        const startDecade = Math.floor(minYear / yearStep) * yearStep;
-        const endDecade = Math.ceil(maxYear / yearStep) * yearStep;
-
-        let yearMarkersHtml = '<div class="timeline-year-markers">';
-        for (let y = startDecade; y <= endDecade; y += yearStep) {
-            yearMarkersHtml += `<div class="timeline-year-marker"><span>${y}</span></div>`;
-        }
-        yearMarkersHtml += '</div>';
-
-        // Build horizontal timeline
-        let html = `
-            <div class="horizontal-timeline">
-                ${lifespan ? `<div class="timeline-lifespan-label">${lifespan}</div>` : ''}
-                <div class="timeline-track"></div>
-                <div class="timeline-markers">
-        `;
-
+        // Build vertical story-card timeline
+        let cardsHtml = '';
         sortedEvents.forEach((event, index) => {
-            html += this.renderTimelineMarker(event, person.id, index, sortedEvents.length);
+            cardsHtml += this.renderStoryCard(event, person.id, index, sortedEvents.length);
         });
 
-        html += `
+        container.innerHTML = `
+            <div class="vertical-timeline">
+                <div class="vertical-timeline-header">
+                    <div class="vertical-timeline-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <span>Life Story</span>
+                        ${lifespan ? `<span class="timeline-lifespan">${lifespan}</span>` : ''}
+                    </div>
+                    <button class="btn btn-primary btn-small" onclick="app.openEventModal('${person.id}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        Add Event
+                    </button>
                 </div>
-                ${years.length > 0 ? yearMarkersHtml : ''}
-                <button class="add-event-floating" onclick="app.openEventModal('${person.id}')" title="Add Event">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </button>
+                <div class="vertical-timeline-cards">
+                    ${cardsHtml}
+                </div>
             </div>
         `;
-
-        container.innerHTML = html;
     }
 
-    renderTimelineMarker(event, personId, index, total) {
+    renderStoryCard(event, personId, index, total) {
         const eventType = this.eventTypes[event.type] || this.eventTypes.custom;
         const title = event.customTitle || eventType.label;
         const dateStr = this.formatEventDate(event);
-        const year = event.date ? new Date(event.date).getFullYear() : '';
+        const eventColor = eventType.color || '#8d9199';
 
-        // Build media HTML for popup
-        let mediaHtml = '';
+        // Build photo thumbnails
+        let photosHtml = '';
         if (event.documents && event.documents.length > 0) {
-            mediaHtml = '<div class="popup-media">';
-            event.documents.slice(0, 3).forEach(doc => {
-                const isImage = this.isImageUrl(doc.url);
-                if (isImage) {
-                    mediaHtml += `<img src="${doc.url}" alt="${doc.label || 'Photo'}" onclick="event.stopPropagation(); app.openDocument('${encodeURIComponent(doc.url)}', '${encodeURIComponent(doc.label || 'Document')}')" onerror="this.style.display='none'">`;
+            const imagesDocs = event.documents.filter(doc => this.isImageUrl(doc.url));
+            if (imagesDocs.length > 0) {
+                photosHtml = '<div class="story-card-photos">';
+                imagesDocs.slice(0, 4).forEach(doc => {
+                    photosHtml += `<img class="story-card-photo" src="${doc.url}" alt="${doc.label || 'Photo'}" onclick="event.stopPropagation(); app.openDocument('${encodeURIComponent(doc.url)}', '${encodeURIComponent(doc.label || 'Photo')}')" onerror="this.style.display='none'">`;
+                });
+                if (imagesDocs.length > 4) {
+                    photosHtml += `<span class="story-card-photos-more">+${imagesDocs.length - 4}</span>`;
                 }
-            });
-            if (event.documents.length > 3) {
-                mediaHtml += `<span class="popup-media-more">+${event.documents.length - 3} more</span>`;
+                photosHtml += '</div>';
             }
-            mediaHtml += '</div>';
+        }
+
+        // Audio player (rendered in Phase 3 — placeholder check)
+        let audioHtml = '';
+        if (event.audioUrl) {
+            const toldBy = event.audioToldBy ? `Told by ${event.audioToldBy}` : '';
+            const recordedBy = event.audioRecordedBy ? `Recorded by ${event.audioRecordedBy}` : '';
+            const credits = [toldBy, recordedBy].filter(Boolean).join(' \u00b7 ');
+
+            audioHtml = `
+                <div class="story-audio-section">
+                    ${event.storyPhotoUrl ? `
+                        <div class="story-audio-photo">
+                            <img src="${event.storyPhotoUrl}" alt="Story photo" onerror="this.parentElement.style.display='none'">
+                        </div>
+                    ` : ''}
+                    <div class="story-audio-player" data-audio-url="${event.audioUrl}">
+                        <button class="audio-play-btn" onclick="event.stopPropagation(); app.toggleAudio(this, '${event.audioUrl}')">
+                            <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <svg class="pause-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+                                <rect x="6" y="4" width="4" height="16"/>
+                                <rect x="14" y="4" width="4" height="16"/>
+                            </svg>
+                        </button>
+                        <div class="audio-waveform">
+                            <div class="audio-progress"></div>
+                        </div>
+                        <span class="audio-time">0:00</span>
+                    </div>
+                    ${credits ? `<div class="story-audio-credits">${credits}</div>` : ''}
+                </div>
+            `;
         }
 
         return `
-            <div class="timeline-marker ${event.type}" data-event-id="${event.id}" data-person-id="${personId}" onclick="app.openEventDetail('${personId}', '${event.id}')">
-                <div class="marker-dot"></div>
-                <div class="marker-label">
-                    <span class="marker-title">${title}</span>
-                    <span class="marker-year">${year}</span>
+            <div class="story-card" data-event-id="${event.id}" data-type="${event.type}">
+                <div class="story-card-marker">
+                    <div class="story-card-dot" style="background: ${eventColor}"></div>
                 </div>
-                <div class="timeline-popup" onclick="event.stopPropagation()">
-                    <div class="popup-header">
-                        <span class="popup-type ${event.type}">${eventType.label}</span>
-                        <span class="popup-date">${dateStr}</span>
+                <div class="story-card-content" onclick="app.openEventDetail('${personId}', '${event.id}')">
+                    <div class="story-card-accent" style="background: ${eventColor}"></div>
+                    <div class="story-card-header">
+                        <span class="story-card-type" style="background: ${eventColor}15; color: ${eventColor}">${eventType.label}</span>
+                        <span class="story-card-date">${dateStr}</span>
                     </div>
-                    ${event.customTitle ? `<h4 class="popup-title">${event.customTitle}</h4>` : ''}
+                    <h3 class="story-card-title">${title}</h3>
                     ${event.location ? `
-                        <div class="popup-location">
+                        <div class="story-card-location">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                                 <circle cx="12" cy="10" r="3"/>
@@ -2405,29 +2429,21 @@ class FamilyTree {
                             ${event.location}
                         </div>
                     ` : ''}
-                    ${event.description ? `<p class="popup-description">${this.truncateText(event.description, 100)}</p>` : ''}
-                    ${mediaHtml}
-                    <div class="popup-actions">
-                        <button class="popup-action view" onclick="event.stopPropagation(); app.openEventDetail('${personId}', '${event.id}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                            View
-                        </button>
-                        <button class="popup-action" onclick="event.stopPropagation(); app.openEventModal('${personId}', '${event.id}')">
+                    ${event.description ? `<p class="story-card-description">${this.truncateText(event.description, 200)}</p>` : ''}
+                    ${photosHtml}
+                    ${audioHtml}
+                    <div class="story-card-actions">
+                        <button class="story-card-action" onclick="event.stopPropagation(); app.openEventModal('${personId}', '${event.id}')" title="Edit">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                             </svg>
-                            Edit
                         </button>
-                        <button class="popup-action delete" onclick="event.stopPropagation(); app.confirmDeleteEvent('${personId}', '${event.id}')">
+                        <button class="story-card-action story-card-action-delete" onclick="event.stopPropagation(); app.confirmDeleteEvent('${personId}', '${event.id}')" title="Delete">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="3 6 5 6 21 6"/>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                             </svg>
-                            Delete
                         </button>
                     </div>
                 </div>
@@ -2895,6 +2911,11 @@ class FamilyTree {
         document.getElementById('eventDocuments').innerHTML = '';
         document.getElementById('customTitleGroup').style.display = 'none';
         document.getElementById('linkedPersonGroup').style.display = 'none';
+        // Clear audio/story fields
+        document.getElementById('eventAudioUrl').value = '';
+        document.getElementById('audioUploadStatus').innerHTML = '';
+        document.getElementById('eventStoryPhotoUrl').value = '';
+        document.getElementById('storyPhotoPreview').innerHTML = '';
 
         // Populate linked person dropdown (exclude current person)
         const linkedPersonSelect = document.getElementById('eventLinkedPerson');
@@ -2948,6 +2969,22 @@ class FamilyTree {
                         this.addDocumentChip(doc.url, doc.label);
                     });
                 }
+
+                // Audio/story fields
+                document.getElementById('eventAudioUrl').value = event.audioUrl || '';
+                document.getElementById('eventAudioToldBy').value = event.audioToldBy || '';
+                document.getElementById('eventAudioRecordedBy').value = event.audioRecordedBy || '';
+                document.getElementById('eventStoryPhotoUrl').value = event.storyPhotoUrl || '';
+                if (event.audioUrl) {
+                    document.getElementById('audioUploadStatus').innerHTML =
+                        `<span class="upload-complete">Audio uploaded</span>
+                         <button type="button" class="btn-remove-upload" onclick="app.removeAudioUpload()">&times;</button>`;
+                }
+                if (event.storyPhotoUrl) {
+                    document.getElementById('storyPhotoPreview').innerHTML =
+                        `<img src="${event.storyPhotoUrl}" alt="Story photo preview">
+                         <button type="button" class="btn-remove-upload" onclick="app.removeStoryPhotoUpload()">&times;</button>`;
+                }
             }
         } else {
             title.textContent = 'Add Life Event';
@@ -2993,7 +3030,11 @@ class FamilyTree {
             description: document.getElementById('eventDescription').value.trim(),
             linkedPersonId: document.getElementById('eventLinkedPerson').value || null,
             documents: documents,
-            source: source
+            source: source,
+            audioUrl: document.getElementById('eventAudioUrl').value.trim() || null,
+            audioToldBy: document.getElementById('eventAudioToldBy').value.trim() || null,
+            audioRecordedBy: document.getElementById('eventAudioRecordedBy').value.trim() || null,
+            storyPhotoUrl: document.getElementById('eventStoryPhotoUrl').value.trim() || null
         };
 
         if (eventId) {
@@ -3110,6 +3151,141 @@ class FamilyTree {
         preview.classList.remove('has-photo');
     }
 
+    // ==================== Audio/Story Upload ====================
+
+    async uploadFileToStorage(file, path) {
+        const storage = window.firebaseStorage;
+        const storageRefFn = window.firebaseStorageRef;
+        const uploadBytes = window.firebaseUploadBytes;
+        const getDownloadURL = window.firebaseGetDownloadURL;
+
+        const fileRef = storageRefFn(storage, path);
+        const snapshot = await uploadBytes(fileRef, file);
+        const downloadURL = await getDownloadURL(snapshot.ref);
+        return downloadURL;
+    }
+
+    async handleAudioUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Validate: mp3 or m4a, max 50MB
+        if (!file.name.match(/\.(mp3|m4a)$/i)) {
+            alert('Please select an MP3 or M4A audio file.');
+            e.target.value = '';
+            return;
+        }
+        if (file.size > 50 * 1024 * 1024) {
+            alert('Audio file must be under 50MB.');
+            e.target.value = '';
+            return;
+        }
+
+        const statusEl = document.getElementById('audioUploadStatus');
+        statusEl.innerHTML = '<span class="upload-progress">Uploading...</span>';
+
+        try {
+            const personId = document.getElementById('eventPersonId').value;
+            const path = `audio/${personId}/${Date.now()}_${file.name}`;
+            const url = await this.uploadFileToStorage(file, path);
+            document.getElementById('eventAudioUrl').value = url;
+            statusEl.innerHTML = `<span class="upload-complete">${file.name}</span>
+                <button type="button" class="btn-remove-upload" onclick="app.removeAudioUpload()">&times;</button>`;
+        } catch (err) {
+            console.error('Audio upload error:', err);
+            statusEl.innerHTML = '<span class="upload-error">Upload failed. Try again.</span>';
+        }
+    }
+
+    async handleStoryPhotoUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('Please select an image file.');
+            e.target.value = '';
+            return;
+        }
+
+        const previewEl = document.getElementById('storyPhotoPreview');
+        previewEl.innerHTML = '<span class="upload-progress">Uploading...</span>';
+
+        try {
+            const personId = document.getElementById('eventPersonId').value;
+            const path = `story-photos/${personId}/${Date.now()}_${file.name}`;
+            const url = await this.uploadFileToStorage(file, path);
+            document.getElementById('eventStoryPhotoUrl').value = url;
+            previewEl.innerHTML = `<img src="${url}" alt="Story photo preview">
+                <button type="button" class="btn-remove-upload" onclick="app.removeStoryPhotoUpload()">&times;</button>`;
+        } catch (err) {
+            console.error('Story photo upload error:', err);
+            previewEl.innerHTML = '<span class="upload-error">Upload failed. Try again.</span>';
+        }
+    }
+
+    removeAudioUpload() {
+        document.getElementById('eventAudioUrl').value = '';
+        document.getElementById('eventAudioFile').value = '';
+        document.getElementById('audioUploadStatus').innerHTML = '';
+    }
+
+    removeStoryPhotoUpload() {
+        document.getElementById('eventStoryPhotoUrl').value = '';
+        document.getElementById('eventStoryPhotoFile').value = '';
+        document.getElementById('storyPhotoPreview').innerHTML = '';
+    }
+
+    toggleAudio(btn, audioUrl) {
+        // If already playing this URL, pause it
+        if (this.currentAudio && this.currentAudio._audioUrl === audioUrl && !this.currentAudio.paused) {
+            this.currentAudio.pause();
+            btn.querySelector('.play-icon').style.display = '';
+            btn.querySelector('.pause-icon').style.display = 'none';
+            return;
+        }
+
+        // Stop any currently playing audio
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            document.querySelectorAll('.audio-play-btn').forEach(b => {
+                b.querySelector('.play-icon').style.display = '';
+                b.querySelector('.pause-icon').style.display = 'none';
+            });
+        }
+
+        // Create new audio element
+        this.currentAudio = new Audio(audioUrl);
+        this.currentAudio._audioUrl = audioUrl;
+        this.currentAudio.play();
+        btn.querySelector('.play-icon').style.display = 'none';
+        btn.querySelector('.pause-icon').style.display = '';
+
+        const playerEl = btn.closest('.story-audio-player');
+        const progressEl = playerEl.querySelector('.audio-progress');
+        const timeEl = playerEl.querySelector('.audio-time');
+
+        this.currentAudio.addEventListener('timeupdate', () => {
+            if (this.currentAudio.duration) {
+                const pct = (this.currentAudio.currentTime / this.currentAudio.duration) * 100;
+                progressEl.style.width = pct + '%';
+                timeEl.textContent = this.formatAudioTime(this.currentAudio.currentTime);
+            }
+        });
+
+        this.currentAudio.addEventListener('ended', () => {
+            btn.querySelector('.play-icon').style.display = '';
+            btn.querySelector('.pause-icon').style.display = 'none';
+            progressEl.style.width = '0%';
+            timeEl.textContent = '0:00';
+        });
+    }
+
+    formatAudioTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
     // ==================== Utilities ====================
 
     formatLifeDates(person) {
@@ -3204,6 +3380,10 @@ class FamilyTree {
         // Photo upload handling
         document.getElementById('photoFile').addEventListener('change', (e) => this.handlePhotoUpload(e));
         document.getElementById('photoUrl').addEventListener('input', (e) => this.handlePhotoUrlChange(e));
+
+        // Audio/story upload handling
+        document.getElementById('eventAudioFile').addEventListener('change', (e) => this.handleAudioUpload(e));
+        document.getElementById('eventStoryPhotoFile').addEventListener('change', (e) => this.handleStoryPhotoUpload(e));
 
         // Event modal
         document.getElementById('closeEventModal').addEventListener('click', () => this.closeEventModal());
