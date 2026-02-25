@@ -126,6 +126,11 @@
     background: linear-gradient(145deg, var(--primary-light), #364555);
 }
 
+[data-theme="dark"] .person-card[data-has-children="true"]::after,
+[data-theme="dark"] .person-card[data-has-parents="true"]::before {
+    background: #6b7a8a;
+}
+
 [data-theme="dark"] .timeline-track {
     background: linear-gradient(90deg,
         var(--border) 0%,
@@ -702,6 +707,30 @@ body {
 
 .person-card:hover::before {
     width: 60px;
+    opacity: 1;
+}
+
+/* Connection stems for parent-child lines */
+.person-card[data-has-children="true"]::after {
+    content: '';
+    position: absolute;
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 12px;
+    background: #c4b5a0;
+    z-index: -1;
+}
+
+.person-card[data-has-parents="true"]::before {
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 12px;
+    background: #c4b5a0;
+    border-radius: 0;
     opacity: 1;
 }
 

@@ -1588,13 +1588,16 @@ class FamilyTree {
         const isFocusRoot = this.focusMode && person.id === this.focusedPersonId;
         const focusRootClass = isFocusRoot ? ' is-focus-root' : '';
 
+        // Check if person has children (for connector line indicators)
+        const hasChildren = this.getChildren(person.id).length > 0;
+
         // Format birthplace for display
         const birthplaceHtml = person.birthPlace
             ? `<div class="birthplace">${person.birthPlace}</div>`
             : '';
 
         return `
-            <div class="person-card${disconnectedClass}${focusRootClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" onclick="app.showTimeline('${person.id}')">
+            <div class="person-card${disconnectedClass}${focusRootClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" ${hasChildren ? 'data-has-children="true"' : ''} ${hasParents ? 'data-has-parents="true"' : ''} onclick="app.showTimeline('${person.id}')">
                 <button class="quick-add-btn quick-add-top" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'parent')" title="Add Parent">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
