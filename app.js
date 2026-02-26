@@ -1110,7 +1110,6 @@ class FamilyTree {
         svg.style.pointerEvents = 'none';
         svg.style.overflow = 'visible';
 
-        const rows = tree.querySelectorAll('.pedigree-row');
         const treeRect = tree.getBoundingClientRect();
 
         // Get connector color based on theme
@@ -1119,181 +1118,188 @@ class FamilyTree {
 
         const isLandscape = this.currentView === 'landscape';
 
-        // Draw lines connecting parents to children
-        for (let i = 0; i < rows.length - 1; i++) {
-            const parentRow = rows[i];
-            const childRow = rows[i + 1];
+        // Helper to create SVG line
+        const addLine = (x1, y1, x2, y2) => {
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', lineColor);
+            line.setAttribute('stroke-width', '2.5');
+            line.setAttribute('stroke-linecap', 'round');
+            svg.appendChild(line);
+        };
 
-            const familyUnits = parentRow.querySelectorAll('.family-unit');
-            const childCards = childRow.querySelectorAll('.person-card');
+        // Helper to add junction dot
+        const addDot = (cx, cy) => {
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', cx);
+            dot.setAttribute('cy', cy);
+            dot.setAttribute('r', '3.5');
+            dot.setAttribute('fill', lineColor);
+            svg.appendChild(dot);
+        };
 
-            familyUnits.forEach(unit => {
-                const parentCards = unit.querySelectorAll('.person-card');
-                if (parentCards.length === 0) return;
+        // Walk the nested DOM tree — for each family-node with children, draw connectors
+        const familyNodes = tree.querySelectorAll('.family-node');
+        familyNodes.forEach(familyNode => {
+            const childrenContainer = familyNode.querySelector(':scope > .family-children');
+            if (!childrenContainer) return; // no children, skip
 
-                // Get parent IDs from this family unit
-                const parentIds = [];
-                parentCards.forEach(card => {
-                    const personId = card.getAttribute('data-person-id');
-                    if (personId) parentIds.push(personId);
+            const parentUnit = familyNode.querySelector(':scope > .family-unit');
+            if (!parentUnit) return;
+
+            const parentCards = parentUnit.querySelectorAll('.person-card');
+            if (parentCards.length === 0) return;
+
+            // Get child family-nodes (direct children only)
+            const childNodes = childrenContainer.querySelectorAll(':scope > .family-node');
+            if (childNodes.length === 0) return;
+
+            // Get child family-units (the .family-unit inside each child .family-node)
+            const childUnits = Array.from(childNodes).map(cn =>
+                cn.querySelector(':scope > .family-unit')
+            ).filter(Boolean);
+
+            if (childUnits.length === 0) return;
+
+            // Get parent position
+            const firstParent = parentCards[0];
+            const lastParent = parentCards[parentCards.length - 1];
+            const firstRect = firstParent.getBoundingClientRect();
+            const lastRect = lastParent.getBoundingClientRect();
+
+            if (isLandscape) {
+                // LANDSCAPE: Lines go left-to-right
+                const coupleCenterY = (
+                    (firstRect.top + firstRect.height / 2) +
+                    (lastRect.top + lastRect.height / 2)
+                ) / 2 - treeRect.top;
+
+                const parentRightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
+
+                // Get child unit positions (center of each child's family-unit)
+                const childPositions = childUnits.map(childUnit => {
+                    const cards = childUnit.querySelectorAll('.person-card');
+                    const fCard = cards[0];
+                    const lCard = cards[cards.length - 1];
+                    const fRect = fCard.getBoundingClientRect();
+                    const lRect = lCard.getBoundingClientRect();
+                    return {
+                        x: fRect.left - treeRect.left,
+                        y: ((fRect.top + fRect.height / 2) + (lRect.top + lRect.height / 2)) / 2 - treeRect.top
+                    };
                 });
 
-                if (parentIds.length === 0) return;
+                const closestChildX = Math.min(...childPositions.map(c => c.x));
+                const midX = parentRightX + (closestChildX - parentRightX) / 2;
 
-                // Find children of these parents
-                const children = [];
-                childCards.forEach(childCard => {
-                    const childId = childCard.getAttribute('data-person-id');
-                    if (!childId) return;
+                // 1. Couple extend-line
+                addLine(parentRightX, coupleCenterY, midX, coupleCenterY);
 
-                    const child = this.getPerson(childId);
-                    if (!child) return;
-
-                    if ((child.fatherId && parentIds.includes(child.fatherId)) ||
-                        (child.motherId && parentIds.includes(child.motherId))) {
-                        children.push(childCard);
-                    }
-                });
-
-                if (children.length === 0) return;
-
-                const firstParent = parentCards[0];
-                const lastParent = parentCards[parentCards.length - 1];
-                const firstRect = firstParent.getBoundingClientRect();
-                const lastRect = lastParent.getBoundingClientRect();
-
-                // Helper to create SVG line
-                const addLine = (x1, y1, x2, y2) => {
-                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('x1', x1);
-                    line.setAttribute('y1', y1);
-                    line.setAttribute('x2', x2);
-                    line.setAttribute('y2', y2);
-                    line.setAttribute('stroke', lineColor);
-                    line.setAttribute('stroke-width', '2.5');
-                    line.setAttribute('stroke-linecap', 'round');
-                    svg.appendChild(line);
-                };
-
-                // Helper to add junction dot
-                const addDot = (cx, cy) => {
-                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                    dot.setAttribute('cx', cx);
-                    dot.setAttribute('cy', cy);
-                    dot.setAttribute('r', '3.5');
-                    dot.setAttribute('fill', lineColor);
-                    svg.appendChild(dot);
-                };
-
-                if (isLandscape) {
-                    // LANDSCAPE: Lines go left-to-right (redesigned)
-                    const coupleCenterY = (
-                        (firstRect.top + firstRect.height / 2) +
-                        (lastRect.top + lastRect.height / 2)
-                    ) / 2 - treeRect.top;
-
-                    const parentRightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
-
-                    // Get child positions (left edge, vertical center)
-                    const childPositions = children.map(childCard => {
-                        const childRect = childCard.getBoundingClientRect();
-                        return {
-                            x: childRect.left - treeRect.left,
-                            y: childRect.top + childRect.height / 2 - treeRect.top
-                        };
-                    });
-
-                    // Calculate midX as actual midpoint between parent right and child left
-                    const closestChildX = Math.min(...childPositions.map(c => c.x));
-                    const midX = parentRightX + (closestChildX - parentRightX) / 2;
-
-                    // 1. Couple extend-line (parent right → midX)
-                    addLine(parentRightX, coupleCenterY, midX, coupleCenterY);
-
-                    if (childPositions.length === 1) {
-                        const child = childPositions[0];
-                        if (Math.abs(coupleCenterY - child.y) < 2) {
-                            // Straight across to child
-                            addLine(midX, coupleCenterY, child.x, child.y);
-                        } else {
-                            // L-shape: vertical jog at midX, then across to child
-                            addLine(midX, coupleCenterY, midX, child.y);
-                            addLine(midX, child.y, child.x, child.y);
-                            addDot(midX, coupleCenterY);
-                            addDot(midX, child.y);
-                        }
+                if (childPositions.length === 1) {
+                    const child = childPositions[0];
+                    if (Math.abs(coupleCenterY - child.y) < 2) {
+                        addLine(midX, coupleCenterY, child.x, child.y);
                     } else {
-                        // 2. Vertical distribution bar
-                        const minY = Math.min(...childPositions.map(c => c.y));
-                        const maxY = Math.max(...childPositions.map(c => c.y));
-                        addLine(midX, minY, midX, maxY);
-
-                        // 3. Child branch-lines (midX → each child left)
-                        childPositions.forEach(child => {
-                            addLine(midX, child.y, child.x, child.y);
-                        });
-
-                        // 4. Junction dots
+                        addLine(midX, coupleCenterY, midX, child.y);
+                        addLine(midX, child.y, child.x, child.y);
                         addDot(midX, coupleCenterY);
-                        childPositions.forEach(child => addDot(midX, child.y));
+                        addDot(midX, child.y);
                     }
                 } else {
-                    // PORTRAIT: Lines go top-to-bottom (redesigned)
-                    const coupleCenterX = (
-                        (firstRect.left + firstRect.width / 2) +
-                        (lastRect.left + lastRect.width / 2)
-                    ) / 2 - treeRect.left;
-
-                    const parentBottomY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
-
-                    const childPositions = children.map(childCard => {
-                        const childRect = childCard.getBoundingClientRect();
-                        return {
-                            x: childRect.left + childRect.width / 2 - treeRect.left,
-                            y: childRect.top - treeRect.top
-                        };
-                    });
-
-                    // Calculate midY as actual midpoint between parent bottom and child top
-                    const topChildY = Math.min(...childPositions.map(c => c.y));
-                    const midY = parentBottomY + (topChildY - parentBottomY) / 2;
-
-                    // 1. Couple drop-line (parent bottom → midY)
-                    addLine(coupleCenterX, parentBottomY, coupleCenterX, midY);
-
-                    if (childPositions.length === 1) {
-                        const child = childPositions[0];
-                        if (Math.abs(coupleCenterX - child.x) < 2) {
-                            // Straight down to child
-                            addLine(coupleCenterX, midY, child.x, child.y);
-                        } else {
-                            // L-shape: horizontal jog at midY, then down to child
-                            addLine(coupleCenterX, midY, child.x, midY);
-                            addLine(child.x, midY, child.x, child.y);
-                            addDot(coupleCenterX, midY);
-                            addDot(child.x, midY);
-                        }
-                    } else {
-                        // 2. Horizontal distribution bar
-                        const minX = Math.min(...childPositions.map(c => c.x));
-                        const maxX = Math.max(...childPositions.map(c => c.x));
-                        addLine(minX, midY, maxX, midY);
-
-                        // 3. Child rise-lines (midY → each child top)
-                        childPositions.forEach(child => {
-                            addLine(child.x, midY, child.x, child.y);
-                        });
-
-                        // 4. Junction dots
-                        addDot(coupleCenterX, midY);
-                        childPositions.forEach(child => addDot(child.x, midY));
-                    }
+                    const minY = Math.min(...childPositions.map(c => c.y));
+                    const maxY = Math.max(...childPositions.map(c => c.y));
+                    addLine(midX, minY, midX, maxY);
+                    childPositions.forEach(child => addLine(midX, child.y, child.x, child.y));
+                    addDot(midX, coupleCenterY);
+                    childPositions.forEach(child => addDot(midX, child.y));
                 }
-            });
-        }
+            } else {
+                // PORTRAIT: Lines go top-to-bottom
+                const coupleCenterX = (
+                    (firstRect.left + firstRect.width / 2) +
+                    (lastRect.left + lastRect.width / 2)
+                ) / 2 - treeRect.left;
+
+                const parentBottomY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
+
+                // Get child unit positions (center of each child's family-unit)
+                const childPositions = childUnits.map(childUnit => {
+                    const cards = childUnit.querySelectorAll('.person-card');
+                    const fCard = cards[0];
+                    const lCard = cards[cards.length - 1];
+                    const fRect = fCard.getBoundingClientRect();
+                    const lRect = lCard.getBoundingClientRect();
+                    return {
+                        x: ((fRect.left + fRect.width / 2) + (lRect.left + lRect.width / 2)) / 2 - treeRect.left,
+                        y: fRect.top - treeRect.top
+                    };
+                });
+
+                const topChildY = Math.min(...childPositions.map(c => c.y));
+                const midY = parentBottomY + (topChildY - parentBottomY) / 2;
+
+                // 1. Couple drop-line
+                addLine(coupleCenterX, parentBottomY, coupleCenterX, midY);
+
+                if (childPositions.length === 1) {
+                    const child = childPositions[0];
+                    if (Math.abs(coupleCenterX - child.x) < 2) {
+                        addLine(coupleCenterX, midY, child.x, child.y);
+                    } else {
+                        addLine(coupleCenterX, midY, child.x, midY);
+                        addLine(child.x, midY, child.x, child.y);
+                        addDot(coupleCenterX, midY);
+                        addDot(child.x, midY);
+                    }
+                } else {
+                    const minX = Math.min(...childPositions.map(c => c.x));
+                    const maxX = Math.max(...childPositions.map(c => c.x));
+                    addLine(minX, midY, maxX, midY);
+                    childPositions.forEach(child => addLine(child.x, midY, child.x, child.y));
+                    addDot(coupleCenterX, midY);
+                    childPositions.forEach(child => addDot(child.x, midY));
+                }
+            }
+        });
 
         tree.style.position = 'relative';
         tree.appendChild(svg);
+    }
+
+    renderFamilyNode(node, depth, nodeIndex) {
+        let html = '<div class="family-node">';
+
+        // Render the family unit (couple or single person)
+        html += '<div class="family-unit">';
+
+        if (node.person1) {
+            html += this.renderPersonCard(node.person1, false, depth, nodeIndex * 2);
+        }
+
+        if (node.person1 && node.person2) {
+            html += '<div class="spouse-connector"></div>';
+        }
+
+        if (node.person2) {
+            html += this.renderPersonCard(node.person2, false, depth, nodeIndex * 2 + 1);
+        }
+
+        html += '</div>'; // end .family-unit
+
+        // Render children recursively
+        if (node.children && node.children.length > 0) {
+            html += '<div class="family-children">';
+            node.children.forEach((childNode, childIndex) => {
+                html += this.renderFamilyNode(childNode, depth + 1, childIndex);
+            });
+            html += '</div>';
+        }
+
+        html += '</div>'; // end .family-node
+        return html;
     }
 
     renderPedigree() {
@@ -1307,37 +1313,20 @@ class FamilyTree {
             return;
         }
 
-        // Build family tree (filtered in focus mode)
-        const generations = this.buildFamilyTree();
+        // Build family tree (returns array of root-level tree nodes)
+        const rootTrees = this.buildFamilyTree();
 
-        console.log('Family tree generations:', generations.length, 'Total people:', this.people.length);
+        console.log('Family tree roots:', rootTrees.length, 'Total people:', this.people.length);
 
-        // Render vertical pedigree (top to bottom, oldest at top)
+        // Render recursive nested pedigree
         let html = '<div class="pedigree-tree">';
 
-        generations.forEach((gen, genIndex) => {
-            html += `<div class="pedigree-row generation-${genIndex}">`;
-
-            gen.forEach((unit, unitIndex) => {
-                // Each unit is either a couple or a single person
-                html += '<div class="family-unit">';
-
-                if (unit.person1) {
-                    html += this.renderPersonCard(unit.person1, false, genIndex, unitIndex * 2);
-                }
-
-                // Show spouse connector if there's a couple
-                if (unit.person1 && unit.person2) {
-                    html += '<div class="spouse-connector"></div>';
-                }
-
-                if (unit.person2) {
-                    html += this.renderPersonCard(unit.person2, false, genIndex, unitIndex * 2 + 1);
-                }
-
-                html += '</div>';
-            });
-
+        rootTrees.forEach((tree, treeIndex) => {
+            const sectionClass = tree.isDisconnected
+                ? 'family-tree-section disconnected-section'
+                : 'family-tree-section';
+            html += `<div class="${sectionClass}">`;
+            html += this.renderFamilyNode(tree, 0, treeIndex);
             html += '</div>';
         });
 
@@ -1420,9 +1409,9 @@ class FamilyTree {
             if (allowedIds && this.focusedPersonId) {
                 // Focus mode fallback: use the focused person as root
                 const focused = this.getPerson(this.focusedPersonId);
-                if (focused) return [[{ person1: focused, person2: null }]];
+                if (focused) return [{ person1: focused, person2: null, children: [] }];
             }
-            return [[{ person1: this.people[0], person2: null }]];
+            return [{ person1: this.people[0], person2: null, children: [] }];
         }
 
         // Step 2: Group root ancestors - but don't pair with spouses who aren't roots
@@ -1449,75 +1438,67 @@ class FamilyTree {
             rootUnits.push({ person1: person, person2: spouse });
         });
 
-        // Step 3: Build generations downward from roots
-        const generations = [rootUnits];
+        // Step 3: Build tree recursively downward from roots
         const allProcessedIds = new Set(processedIds);
-        let currentGen = rootUnits;
-        let maxIterations = 20;
 
-        while (maxIterations-- > 0) {
-            const nextGen = [];
-            const nextGenIds = new Set();
+        const buildSubtree = (unit) => {
+            const parentIds = [unit.person1?.id, unit.person2?.id].filter(Boolean);
 
-            currentGen.forEach(unit => {
-                const parentIds = [unit.person1?.id, unit.person2?.id].filter(Boolean);
+            // Find children of this couple/person
+            const children = this.people.filter(p =>
+                !allProcessedIds.has(p.id) &&
+                isAllowed(p) &&
+                ((p.fatherId && parentIds.includes(p.fatherId)) ||
+                 (p.motherId && parentIds.includes(p.motherId)))
+            );
 
-                // Find children of anyone in this unit
-                const children = this.people.filter(p =>
-                    !allProcessedIds.has(p.id) &&
-                    isAllowed(p) &&
-                    ((p.fatherId && parentIds.includes(p.fatherId)) ||
-                     (p.motherId && parentIds.includes(p.motherId)))
-                );
+            // Sort by birth date for consistent ordering
+            children.sort((a, b) => (a.birthDate || '').localeCompare(b.birthDate || ''));
 
-                children.forEach(child => {
-                    if (nextGenIds.has(child.id)) return;
-                    nextGenIds.add(child.id);
-                    allProcessedIds.add(child.id);
+            unit.children = [];
 
-                    // Find spouse for this child (spouse may not be processed yet)
-                    let childSpouse = null;
-                    if (child.spouseIds && child.spouseIds.length > 0) {
-                        for (const spouseId of child.spouseIds) {
-                            if (!allProcessedIds.has(spouseId) && !nextGenIds.has(spouseId)) {
-                                const potentialSpouse = this.getPerson(spouseId);
-                                if (potentialSpouse) {
-                                    // Guard: if spouse has unprocessed parents, don't pair yet —
-                                    // they belong in their parents' generation and will be added later
-                                    const spouseParentsPending =
-                                        (potentialSpouse.fatherId && !allProcessedIds.has(potentialSpouse.fatherId)) ||
-                                        (potentialSpouse.motherId && !allProcessedIds.has(potentialSpouse.motherId));
-                                    if (spouseParentsPending) continue;
+            children.forEach(child => {
+                if (allProcessedIds.has(child.id)) return;
+                allProcessedIds.add(child.id);
 
-                                    childSpouse = potentialSpouse;
-                                    nextGenIds.add(spouseId);
-                                    allProcessedIds.add(spouseId);
-                                    break;
-                                }
+                // Find spouse for this child
+                let childSpouse = null;
+                if (child.spouseIds && child.spouseIds.length > 0) {
+                    for (const spouseId of child.spouseIds) {
+                        if (!allProcessedIds.has(spouseId)) {
+                            const potentialSpouse = this.getPerson(spouseId);
+                            if (potentialSpouse && isAllowed(potentialSpouse)) {
+                                childSpouse = potentialSpouse;
+                                allProcessedIds.add(spouseId);
+                                break;
                             }
                         }
                     }
+                }
 
-                    nextGen.push({ person1: child, person2: childSpouse });
-                });
+                const childNode = { person1: child, person2: childSpouse, children: [] };
+                unit.children.push(childNode);
             });
 
-            if (nextGen.length === 0) break;
+            // Recurse into each child node
+            unit.children.forEach(childNode => buildSubtree(childNode));
+        };
 
-            generations.push(nextGen);
-            currentGen = nextGen;
-        }
+        // Build subtree for each root unit
+        rootUnits.forEach(unit => {
+            unit.children = [];
+            buildSubtree(unit);
+        });
 
         // Step 4: Handle anyone not yet in tree (truly disconnected)
         // Skip this in focus mode - we only want the lineage
         if (this.focusMode) {
-            return generations;
+            return rootUnits;
         }
 
         const disconnected = this.people.filter(p => !allProcessedIds.has(p.id));
         if (disconnected.length > 0) {
             const disconnectedProcessed = new Set();
-            const disconnectedUnits = [];
 
             disconnected.forEach(person => {
                 if (disconnectedProcessed.has(person.id)) return;
@@ -1536,28 +1517,11 @@ class FamilyTree {
                     }
                 }
 
-                disconnectedUnits.push({ person1: person, person2: spouse });
+                rootUnits.push({ person1: person, person2: spouse, children: [], isDisconnected: true });
             });
-
-            if (disconnectedUnits.length > 0) {
-                // Add as a new generation at the bottom
-                generations.push(disconnectedUnits);
-            }
         }
 
-        return generations;
-    }
-
-    renderConnectorRow(parentGen, childGen, genIndex) {
-        // Create SVG connectors between parent pairs and their children
-        const numParentPairs = parentGen.length / 2;
-        let html = '<div class="connector-row">';
-        html += `<svg class="connector-svg" preserveAspectRatio="none">`;
-
-        // We'll calculate actual positions after DOM render, for now create placeholder
-        html += '</svg>';
-        html += '</div>';
-        return html;
+        return rootUnits;
     }
 
     buildAncestorTree(person, maxGenerations) {

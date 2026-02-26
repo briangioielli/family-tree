@@ -561,9 +561,15 @@ body {
     overflow-x: auto;
 }
 
-.pedigree-tree.landscape .pedigree-row {
+.pedigree-tree.landscape .family-node {
+    flex-direction: row;
+    align-items: center;
+}
+
+.pedigree-tree.landscape .family-children {
     flex-direction: column;
-    padding: 0 30px;
+    padding-top: 0;
+    padding-left: 40px;
     gap: 20px;
 }
 
@@ -599,20 +605,34 @@ body {
     z-index: 0;
 }
 
-.connector-row {
-    height: 40px;
-    position: relative;
-    width: 100%;
-}
-
-/* Pedigree Row (each generation) */
-.pedigree-row {
+/* Family Tree Section (one per root family) */
+.family-tree-section {
     display: flex;
     justify-content: center;
-    gap: 40px;
-    position: relative;
-    padding: 40px 0;
-    flex-wrap: wrap;
+    margin-bottom: 40px;
+}
+
+/* Family Node (couple/single + their children below) */
+.family-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Children container */
+.family-children {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    gap: 24px;
+    padding-top: 40px;
+}
+
+/* Disconnected people section */
+.disconnected-section {
+    border-top: 2px dashed var(--primary);
+    padding-top: 30px;
+    margin-top: 20px;
 }
 
 /* Family Unit (couple or single person) */
@@ -646,21 +666,7 @@ body {
     text-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
-.pedigree-row.generation-0 {
-    margin-bottom: 20px;
-}
-
-/* Connector Lines Container */
-.connectors-container {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
-}
-
+/* Connector Lines SVG (legacy reference) */
 .connectors-container svg {
     position: absolute;
     top: 0;
@@ -3410,15 +3416,13 @@ body {
         padding: 20px 10px 40px;
     }
 
-    .pedigree-row {
+    .family-children {
         gap: 12px;
-        flex-wrap: wrap;
+        padding-top: 24px;
     }
 
-    .pedigree-row.generation-1,
-    .pedigree-row.generation-2,
-    .pedigree-row.generation-3 {
-        gap: 12px;
+    .family-tree-section {
+        margin-bottom: 24px;
     }
 
     .person-card {
