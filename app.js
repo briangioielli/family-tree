@@ -1381,21 +1381,47 @@ class FamilyTree {
         };
 
         const rootAncestors = this.people.filter(p => {
-            // In focus mode, must be in the lineage
             if (!isAllowed(p)) return false;
 
-            // Must have no parents
-            if (hasParentsInSystem(p)) return false;
+            if (allowedIds) {
+                // FOCUS MODE: root = no parents within the lineage
+                const fatherInLineage = p.fatherId && allowedIds.has(p.fatherId);
+                const motherInLineage = p.motherId && allowedIds.has(p.motherId);
+                if (fatherInLineage || motherInLineage) return false;
 
-            // If spouse has parents, this person is NOT a root
-            // (they'll be added as a spouse in the spouse's generation)
-            if (spouseHasParents(p)) return false;
+                // Skip if ALL spouses have parents in lineage (person will be reached through spouse's family)
+                if (p.spouseIds && p.spouseIds.length > 0) {
+                    const allSpousesHaveParentsInLineage = p.spouseIds.every(spouseId => {
+                        if (!allowedIds.has(spouseId)) return false;
+                        const spouse = this.getPerson(spouseId);
+                        if (!spouse) return false;
+                        return (spouse.fatherId && allowedIds.has(spouse.fatherId)) ||
+                               (spouse.motherId && allowedIds.has(spouse.motherId));
+                    });
+                    if (allSpousesHaveParentsInLineage) return false;
+                }
+            } else {
+                // NORMAL MODE: must have no parents in the system
+                if (hasParentsInSystem(p)) return false;
+                // Only exclude if ALL spouses have parents (person will be pulled in through spouse's family)
+                if (p.spouseIds && p.spouseIds.length > 0) {
+                    const allSpousesHaveParents = p.spouseIds.every(spouseId => {
+                        const spouse = this.getPerson(spouseId);
+                        return spouse && hasParentsInSystem(spouse);
+                    });
+                    if (allSpousesHaveParents) return false;
+                }
+            }
 
             return true;
         });
 
         if (rootAncestors.length === 0 && this.people.length > 0) {
-            // Fallback: use the person with most ancestors as focus
+            if (allowedIds && this.focusedPersonId) {
+                // Focus mode fallback: use the focused person as root
+                const focused = this.getPerson(this.focusedPersonId);
+                if (focused) return [[{ person1: focused, person2: null }]];
+            }
             return [[{ person1: this.people[0], person2: null }]];
         }
 
@@ -1454,8 +1480,16 @@ class FamilyTree {
                     if (child.spouseIds && child.spouseIds.length > 0) {
                         for (const spouseId of child.spouseIds) {
                             if (!allProcessedIds.has(spouseId) && !nextGenIds.has(spouseId)) {
-                                childSpouse = this.getPerson(spouseId);
-                                if (childSpouse) {
+                                const potentialSpouse = this.getPerson(spouseId);
+                                if (potentialSpouse) {
+                                    // Guard: if spouse has unprocessed parents, don't pair yet —
+                                    // they belong in their parents' generation and will be added later
+                                    const spouseParentsPending =
+                                        (potentialSpouse.fatherId && !allProcessedIds.has(potentialSpouse.fatherId)) ||
+                                        (potentialSpouse.motherId && !allProcessedIds.has(potentialSpouse.motherId));
+                                    if (spouseParentsPending) continue;
+
+                                    childSpouse = potentialSpouse;
                                     nextGenIds.add(spouseId);
                                     allProcessedIds.add(spouseId);
                                     break;
@@ -1669,6 +1703,7 @@ class FamilyTree {
 
         document.getElementById('pedigreeView').classList.add('hidden');
         document.getElementById('timelineView').classList.remove('hidden');
+        window.scrollTo(0, 0);
 
         this.renderPersonHeader(person);
         this.renderTimelineEvents(person);
