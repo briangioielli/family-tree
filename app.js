@@ -1,3485 +1,1575 @@
-// Family Tree Application
+// ============================================
+//   OUR FAMILY STORY — Application
+//   A warm, story-first family memoir.
+// ============================================
 
-class FamilyTree {
+class FamilyStoryApp {
     constructor() {
         this.people = [];
-        this.focusedPersonId = null;
-        this.currentPersonId = null; // For timeline view
-        this.currentYear = new Date().getFullYear();
-        this.firebaseReady = false;
-        this.unsubscribe = null; // For real-time listener
-        this.currentView = 'portrait'; // 'portrait' or 'landscape'
-        this.focusMode = true; // Start in focus mode by default
-        this.currentAudio = null; // For audio story playback
-
-        // Event type definitions
-        this.eventTypes = {
-            birth: { label: 'Birth', color: '#10b981' },
-            baptism: { label: 'Baptism', color: '#8b5cf6' },
-            education: { label: 'Education', color: '#3b82f6' },
-            graduation: { label: 'Graduation', color: '#3b82f6' },
-            military: { label: 'Military Service', color: '#6b7280' },
-            occupation: { label: 'Career', color: '#f59e0b' },
-            marriage: { label: 'Marriage', color: '#ec4899' },
-            divorce: { label: 'Divorce', color: '#78716c' },
-            residence: { label: 'Residence', color: '#06b6d4' },
-            immigration: { label: 'Immigration', color: '#06b6d4' },
-            medical: { label: 'Medical', color: '#ef4444' },
-            achievement: { label: 'Achievement', color: '#eab308' },
-            story: { label: 'Story', color: '#8b5cf6' },
-            death: { label: 'Death', color: '#64748b' },
-            burial: { label: 'Burial', color: '#57534e' },
-            custom: { label: 'Event', color: '#6b7280' }
-        };
-
-        this.init();
+        this.stories = [];
+        this.currentView = null;
+        this.currentAudio = null;
+        this.isFirebaseReady = false;
+        this.scrollObserver = null;
     }
 
-    init() {
-        this.loadTheme();
-        this.bindEvents();
+    // ─── INITIALIZATION ────────────────────────
 
-        // Wait for Firebase to be ready before loading data
-        if (window.firebaseDb) {
-            this.firebaseReady = true;
-            this.loadData();
-        } else {
-            window.addEventListener('firebase-ready', () => {
-                this.firebaseReady = true;
-                this.loadData();
-            });
-        }
-    }
+    async init() {
+        // Guard against double-initialization
+        if (this.isFirebaseReady) return;
 
-    loadTheme() {
-        const savedTheme = localStorage.getItem('theme') || 'light';
-        document.documentElement.setAttribute('data-theme', savedTheme);
-        const toggle = document.getElementById('darkModeToggle');
-        if (toggle) {
-            toggle.checked = savedTheme === 'dark';
-        }
-    }
-
-    toggleDarkMode() {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', newTheme);
-        localStorage.setItem('theme', newTheme);
-    }
-
-    // ==================== Data Management ====================
-
-    async loadData() {
-        if (!this.firebaseReady) {
-            console.log('Firebase not ready, waiting...');
+        // Wait for Firebase to be ready
+        if (!window.firebaseDb) {
+            window.addEventListener('firebase-ready', () => this.init());
             return;
         }
 
-        try {
-            const db = window.firebaseDb;
-            const collection = window.firebaseCollection;
-            const onSnapshot = window.firebaseOnSnapshot;
+        this.isFirebaseReady = true;
 
-            // Set up real-time listener for changes
-            const peopleRef = collection(db, 'people');
+        // Setup routing
+        window.addEventListener('hashchange', () => this.navigate());
 
-            this.unsubscribe = onSnapshot(peopleRef, (snapshot) => {
-                this.people = [];
-                snapshot.forEach((doc) => {
-                    this.people.push(doc.data());
-                });
+        // Setup nav scroll behavior
+        this.setupNavScroll();
 
-                console.log('Loaded', this.people.length, 'people from Firebase');
+        // Setup scroll animations observer
+        this.setupScrollObserver();
 
-                // Recalculate best focus person when data changes
-                // This ensures the tree shows the fullest view after new people are added
-                if (this.people.length > 0) {
-                    const bestFocus = this.findBestFocusPerson();
-                    // Only change focus if current focused person doesn't exist or if we can show more ancestors
-                    if (!this.focusedPersonId || !this.getPerson(this.focusedPersonId)) {
-                        this.focusedPersonId = bestFocus;
+        // Setup modal UX (click-outside-to-close, Escape key)
+        this.setupModalBehavior();
+
+        // Load data from Firestore
+        await this.loadData();
+
+        // Initial route
+        this.navigate();
+    }
+
+    setupNavScroll() {
+        const nav = document.getElementById('siteNav');
+        let ticking = false;
+        window.addEventListener('scroll', () => {
+            if (!ticking) {
+                requestAnimationFrame(() => {
+                    if (window.scrollY > 20) {
+                        nav.classList.add('scrolled');
+                    } else {
+                        nav.classList.remove('scrolled');
                     }
-                }
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        });
+    }
 
-                // Render the tree (even if empty - will show empty state)
-                this.render();
-            }, (error) => {
-                console.error('Error loading data from Firebase:', error);
-                // Fall back to localStorage if Firebase fails
-                this.loadFromLocalStorage();
+    setupScrollObserver() {
+        this.scrollObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    }
+
+    setupModalBehavior() {
+        // Click outside modal content to close
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('open');
+                }
+            });
+        });
+
+        // Escape key closes any open modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.open').forEach(m => {
+                    m.classList.remove('open');
+                });
+            }
+        });
+    }
+
+    observeElements() {
+        requestAnimationFrame(() => {
+            document.querySelectorAll('.story-card, .fade-in').forEach(el => {
+                if (!el.classList.contains('visible')) {
+                    this.scrollObserver.observe(el);
+                }
+            });
+        });
+    }
+
+    // ─── DATA LOADING ──────────────────────────
+
+    async loadData() {
+        try {
+            const [peopleSnap, storiesSnap] = await Promise.all([
+                window.firebaseGetDocs(
+                    window.firebaseCollection(window.firebaseDb, 'people')
+                ),
+                window.firebaseGetDocs(
+                    window.firebaseCollection(window.firebaseDb, 'stories')
+                ).catch(() => ({ docs: [], forEach: () => {} }))
+            ]);
+
+            this.people = [];
+            peopleSnap.forEach(doc => {
+                this.people.push({ id: doc.id, ...doc.data() });
             });
 
-        } catch (error) {
-            console.error('Error setting up Firebase:', error);
-            this.loadFromLocalStorage();
+            this.stories = [];
+            storiesSnap.forEach(doc => {
+                this.stories.push({ id: doc.id, ...doc.data() });
+            });
+
+            // Sort stories: those with sortOrder first (ascending), then by date descending
+            this.stories.sort((a, b) => {
+                const aHasOrder = a.sortOrder !== undefined;
+                const bHasOrder = b.sortOrder !== undefined;
+                if (aHasOrder && bHasOrder) return a.sortOrder - b.sortOrder;
+                if (aHasOrder) return -1;
+                if (bHasOrder) return 1;
+                return (b.date || '').localeCompare(a.date || '');
+            });
+
+            // Sort people alphabetically by name
+            this.people.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+        } catch (err) {
+            console.error('Error loading data:', err);
         }
     }
 
-    loadFromLocalStorage() {
-        const saved = localStorage.getItem('familyTreeV3');
-        if (saved) {
-            this.people = JSON.parse(saved);
-            if (this.people.length > 0 && !this.focusedPersonId) {
-                this.focusedPersonId = this.findBestFocusPerson();
-            }
-        } else {
-            this.loadSampleData();
-        }
-        this.render();
-    }
-
-    findBestFocusPerson() {
-        if (this.people.length === 0) return null;
-
-        // Find the person with the most ancestors to show the fullest tree
-        // This is typically someone from the youngest generation
-        let bestPerson = this.people[0];
-        let maxAncestors = 0;
-
-        this.people.forEach(person => {
-            const ancestorCount = this.countAncestors(person, 0);
-            if (ancestorCount > maxAncestors) {
-                maxAncestors = ancestorCount;
-                bestPerson = person;
-            }
-        });
-
-        return bestPerson.id;
-    }
-
-    countAncestors(person, depth) {
-        if (depth > 10) return 0; // Prevent infinite loops
-        let count = 0;
-
-        if (person.fatherId) {
-            const father = this.getPerson(person.fatherId);
-            if (father) {
-                count += 1 + this.countAncestors(father, depth + 1);
-            }
-        }
-
-        if (person.motherId) {
-            const mother = this.getPerson(person.motherId);
-            if (mother) {
-                count += 1 + this.countAncestors(mother, depth + 1);
-            }
-        }
-
-        return count;
-    }
-
-    async saveData() {
-        // Also save to localStorage as backup
-        localStorage.setItem('familyTreeV3', JSON.stringify(this.people));
-
-        if (!this.firebaseReady) return;
-
-        try {
-            const db = window.firebaseDb;
-            const doc = window.firebaseDoc;
-            const setDoc = window.firebaseSetDoc;
-
-            // Save each person to Firebase
-            for (const person of this.people) {
-                const personRef = doc(db, 'people', person.id);
-                await setDoc(personRef, person);
-            }
-            console.log('Data saved to Firebase');
-        } catch (error) {
-            console.error('Error saving to Firebase:', error);
-        }
-    }
-
-    async deletePersonFromFirebase(personId) {
-        if (!this.firebaseReady) return;
-
-        try {
-            const db = window.firebaseDb;
-            const doc = window.firebaseDoc;
-            const deleteDoc = window.firebaseDeleteDoc;
-
-            const personRef = doc(db, 'people', personId);
-            await deleteDoc(personRef);
-            console.log('Person deleted from Firebase');
-        } catch (error) {
-            console.error('Error deleting from Firebase:', error);
-        }
-    }
-
-    async savePersonToFirebase(person) {
-        if (!this.firebaseReady) return;
-
-        try {
-            const db = window.firebaseDb;
-            const doc = window.firebaseDoc;
-            const setDoc = window.firebaseSetDoc;
-
-            const personRef = doc(db, 'people', person.id);
-            await setDoc(personRef, person);
-            console.log('Person saved to Firebase:', person.name);
-        } catch (error) {
-            console.error('Error saving person to Firebase:', error);
-        }
-    }
-
-    loadSampleData() {
-        // Create a multi-generational family tree
-        const greatGrandfather1 = this.createPerson({
-            name: 'William James Thompson',
-            birthDate: '1895-03-15',
-            deathDate: '1972-11-20',
-            birthPlace: 'Boston, Massachusetts',
-            biography: 'A hardworking carpenter who immigrated from Ireland in his youth.',
-            photoUrl: '',
-            events: [
-                { type: 'birth', date: '1895-03-15', location: 'County Cork, Ireland', description: 'Born to a farming family' },
-                { type: 'immigration', date: '1912-06-01', location: 'Ellis Island, New York', description: 'Arrived in America at age 17, seeking a better life' },
-                { type: 'occupation', date: '1915-01-01', endDate: '1965-12-31', location: 'Boston, MA', description: 'Master carpenter, built many homes in the Boston area' },
-                { type: 'marriage', date: '1920-06-15', location: 'St. Patrick\'s Church, Boston', description: 'Married Margaret O\'Brien' },
-                { type: 'death', date: '1972-11-20', location: 'Boston, Massachusetts', description: '' }
-            ]
-        });
-
-        const greatGrandmother1 = this.createPerson({
-            name: 'Margaret O\'Brien Thompson',
-            birthDate: '1898-07-22',
-            deathDate: '1985-04-10',
-            birthPlace: 'Boston, Massachusetts',
-            biography: 'A devoted mother and talented seamstress.',
-            events: [
-                { type: 'birth', date: '1898-07-22', location: 'Boston, Massachusetts', description: '' },
-                { type: 'marriage', date: '1920-06-15', location: 'St. Patrick\'s Church, Boston', description: 'Married William Thompson' },
-                { type: 'death', date: '1985-04-10', location: 'Boston, Massachusetts', description: '' }
-            ]
-        });
-
-        const greatGrandfather2 = this.createPerson({
-            name: 'Robert Charles Miller',
-            birthDate: '1892-11-08',
-            deathDate: '1968-02-14',
-            birthPlace: 'Philadelphia, Pennsylvania',
-            biography: 'A WWI veteran and factory foreman.',
-            events: [
-                { type: 'birth', date: '1892-11-08', location: 'Philadelphia, Pennsylvania', description: '' },
-                { type: 'military', date: '1917-04-01', endDate: '1918-11-11', location: 'France', description: 'Served in WWI with the American Expeditionary Forces' },
-                { type: 'marriage', date: '1919-09-20', location: 'Philadelphia, PA', description: 'Married Helen Smith' },
-                { type: 'death', date: '1968-02-14', location: 'Philadelphia, Pennsylvania', description: '' }
-            ]
-        });
-
-        const greatGrandmother2 = this.createPerson({
-            name: 'Helen Smith Miller',
-            birthDate: '1896-05-30',
-            deathDate: '1978-08-25',
-            birthPlace: 'Philadelphia, Pennsylvania',
-            biography: 'A schoolteacher who loved poetry and music.',
-            events: [
-                { type: 'birth', date: '1896-05-30', location: 'Philadelphia, Pennsylvania', description: '' },
-                { type: 'education', date: '1914-09-01', endDate: '1916-05-15', location: 'Philadelphia Normal School', description: 'Studied to become a teacher' },
-                { type: 'occupation', date: '1916-09-01', endDate: '1919-06-15', location: 'Philadelphia, PA', description: 'Elementary school teacher' },
-                { type: 'marriage', date: '1919-09-20', location: 'Philadelphia, PA', description: 'Married Robert Miller' },
-                { type: 'death', date: '1978-08-25', location: 'Philadelphia, Pennsylvania', description: '' }
-            ]
-        });
-
-        const grandfather = this.createPerson({
-            name: 'James William Thompson',
-            birthDate: '1925-04-12',
-            deathDate: '2010-09-05',
-            birthPlace: 'Boston, Massachusetts',
-            fatherId: greatGrandfather1.id,
-            motherId: greatGrandmother1.id,
-            biography: 'A Korean War veteran who became a successful businessman.',
-            events: [
-                { type: 'birth', date: '1925-04-12', location: 'Boston, Massachusetts', description: '' },
-                { type: 'military', date: '1950-07-01', endDate: '1953-07-27', location: 'Korea', description: 'Served in the Korean War' },
-                { type: 'marriage', date: '1955-08-20', location: 'Boston, MA', description: 'Married Dorothy Miller' },
-                { type: 'occupation', date: '1955-01-01', endDate: '1990-12-31', location: 'Boston, MA', description: 'Founded Thompson Hardware, a successful local business' },
-                { type: 'death', date: '2010-09-05', location: 'Boston, Massachusetts', description: '' }
-            ]
-        });
-
-        const grandmother = this.createPerson({
-            name: 'Dorothy Miller Thompson',
-            birthDate: '1928-12-03',
-            deathDate: '2015-03-18',
-            birthPlace: 'Philadelphia, Pennsylvania',
-            fatherId: greatGrandfather2.id,
-            motherId: greatGrandmother2.id,
-            biography: 'A loving grandmother who was known for her amazing cooking.',
-            events: [
-                { type: 'birth', date: '1928-12-03', location: 'Philadelphia, Pennsylvania', description: '' },
-                { type: 'education', date: '1946-09-01', endDate: '1950-05-15', location: 'Temple University', description: 'Bachelor\'s degree in English Literature' },
-                { type: 'marriage', date: '1955-08-20', location: 'Boston, MA', description: 'Married James Thompson' },
-                { type: 'story', date: '1975-12-25', location: 'Boston, MA', description: 'The Christmas she taught all the grandchildren her secret cookie recipe' },
-                { type: 'death', date: '2015-03-18', location: 'Boston, Massachusetts', description: '' }
-            ]
-        });
-
-        // Set spouses
-        grandfather.spouseIds = [grandmother.id];
-        grandmother.spouseIds = [grandfather.id];
-        greatGrandfather1.spouseIds = [greatGrandmother1.id];
-        greatGrandmother1.spouseIds = [greatGrandfather1.id];
-        greatGrandfather2.spouseIds = [greatGrandmother2.id];
-        greatGrandmother2.spouseIds = [greatGrandfather2.id];
-
-        const father = this.createPerson({
-            name: 'Michael James Thompson',
-            birthDate: '1958-06-22',
-            birthPlace: 'Boston, Massachusetts',
-            fatherId: grandfather.id,
-            motherId: grandmother.id,
-            biography: 'A software engineer who loves hiking and photography.',
-            events: [
-                { type: 'birth', date: '1958-06-22', location: 'Boston, Massachusetts', description: '' },
-                { type: 'education', date: '1976-09-01', endDate: '1980-05-15', location: 'MIT', description: 'Bachelor\'s degree in Computer Science' },
-                { type: 'marriage', date: '1985-10-12', location: 'Cambridge, MA', description: 'Married Sarah Johnson' },
-                { type: 'occupation', date: '1980-06-01', location: 'Various tech companies', description: 'Software engineer, later became CTO at a startup' }
-            ]
-        });
-
-        const mother = this.createPerson({
-            name: 'Sarah Johnson Thompson',
-            birthDate: '1960-02-14',
-            birthPlace: 'Cambridge, Massachusetts',
-            biography: 'A pediatrician who has helped thousands of children.',
-            events: [
-                { type: 'birth', date: '1960-02-14', location: 'Cambridge, Massachusetts', description: '' },
-                { type: 'education', date: '1978-09-01', endDate: '1986-05-15', location: 'Harvard Medical School', description: 'M.D. in Pediatric Medicine' },
-                { type: 'marriage', date: '1985-10-12', location: 'Cambridge, MA', description: 'Married Michael Thompson' },
-                { type: 'occupation', date: '1986-07-01', location: 'Boston Children\'s Hospital', description: 'Pediatrician, helping families for over 35 years' }
-            ]
-        });
-
-        father.spouseIds = [mother.id];
-        mother.spouseIds = [father.id];
-
-        const child = this.createPerson({
-            name: 'Emily Rose Thompson',
-            birthDate: '1990-08-30',
-            birthPlace: 'Boston, Massachusetts',
-            fatherId: father.id,
-            motherId: mother.id,
-            biography: 'Following in the family tradition of helping others.',
-            events: [
-                { type: 'birth', date: '1990-08-30', location: 'Boston, Massachusetts', description: '' },
-                { type: 'education', date: '2008-09-01', endDate: '2012-05-15', location: 'Boston University', description: 'Bachelor\'s degree in Nursing' },
-                { type: 'graduation', date: '2012-05-15', location: 'Boston University', description: 'Graduated with honors' },
-                { type: 'occupation', date: '2012-08-01', location: 'Massachusetts General Hospital', description: 'Registered Nurse in the emergency department' }
-            ]
-        });
-
-        this.people = [
-            greatGrandfather1, greatGrandmother1, greatGrandfather2, greatGrandmother2,
-            grandfather, grandmother, father, mother, child
-        ];
-
-        this.focusedPersonId = child.id;
-
-        // Save all sample people to Firebase
-        this.people.forEach(person => this.savePersonToFirebase(person));
-        this.saveData();
-        this.render();
-    }
-
-    createPerson(data) {
-        return {
-            id: this.generateId(),
-            name: data.name || '',
-            birthDate: data.birthDate || null,
-            deathDate: data.deathDate || null,
-            birthPlace: data.birthPlace || '',
-            photoUrl: data.photoUrl || '',
-            biography: data.biography || '',
-            fatherId: data.fatherId || null,
-            motherId: data.motherId || null,
-            spouseIds: data.spouseIds || [],
-            documents: data.documents || [], // General documents for the person
-            events: (data.events || []).map(e => ({
-                id: this.generateId(),
-                type: e.type,
-                customTitle: e.customTitle || null,
-                date: e.date || null,
-                endDate: e.endDate || null,
-                location: e.location || '',
-                description: e.description || '',
-                documents: e.documents || []
-            }))
-        };
-    }
-
-    generateId() {
-        return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    }
+    // ─── DATA HELPERS ──────────────────────────
 
     getPerson(id) {
         return this.people.find(p => p.id === id);
     }
 
+    getStoriesForPerson(personId) {
+        return this.stories.filter(s =>
+            s.peopleIds && s.peopleIds.includes(personId)
+        );
+    }
+
     getChildren(personId) {
-        return this.people.filter(p => p.fatherId === personId || p.motherId === personId);
+        return this.people.filter(p =>
+            p.fatherId === personId || p.motherId === personId
+        );
     }
 
     getSiblings(personId) {
         const person = this.getPerson(personId);
         if (!person) return [];
         return this.people.filter(p =>
-            p.id !== personId &&
-            ((person.fatherId && p.fatherId === person.fatherId) ||
-             (person.motherId && p.motherId === person.motherId))
+            p.id !== personId && (
+                (person.fatherId && p.fatherId === person.fatherId) ||
+                (person.motherId && p.motherId === person.motherId)
+            )
         );
-    }
-
-    // Get all ancestors of a person (recursive, going up)
-    getAncestors(personId, maxDepth = 15) {
-        const ancestors = [];
-        const visited = new Set();
-
-        const collect = (id, depth) => {
-            if (depth > maxDepth || visited.has(id)) return;
-            visited.add(id);
-
-            const person = this.getPerson(id);
-            if (!person) return;
-
-            if (person.fatherId) {
-                const father = this.getPerson(person.fatherId);
-                if (father) {
-                    ancestors.push(father);
-                    collect(father.id, depth + 1);
-                }
-            }
-            if (person.motherId) {
-                const mother = this.getPerson(person.motherId);
-                if (mother) {
-                    ancestors.push(mother);
-                    collect(mother.id, depth + 1);
-                }
-            }
-        };
-
-        collect(personId, 0);
-        return ancestors;
-    }
-
-    // Get all descendants of a person (recursive, going down)
-    getDescendants(personId, maxDepth = 15) {
-        const descendants = [];
-        const visited = new Set();
-
-        const collect = (id, depth) => {
-            if (depth > maxDepth || visited.has(id)) return;
-            visited.add(id);
-
-            const children = this.getChildren(id);
-            children.forEach(child => {
-                descendants.push(child);
-                collect(child.id, depth + 1);
-            });
-        };
-
-        collect(personId, 0);
-        return descendants;
-    }
-
-    // Get the focused lineage (ancestors + descendants + spouses)
-    getFocusedLineage(personId) {
-        const person = this.getPerson(personId);
-        if (!person) return new Set();
-
-        const lineage = new Set();
-        lineage.add(personId);
-
-        // Add ancestors
-        this.getAncestors(personId).forEach(p => lineage.add(p.id));
-
-        // Add descendants
-        this.getDescendants(personId).forEach(p => lineage.add(p.id));
-
-        // Add spouses of focused person
-        if (person.spouseIds) {
-            person.spouseIds.forEach(id => lineage.add(id));
-        }
-
-        // Add spouses of ancestors (so couples stay together)
-        this.getAncestors(personId).forEach(ancestor => {
-            if (ancestor.spouseIds) {
-                ancestor.spouseIds.forEach(id => lineage.add(id));
-            }
-        });
-
-        // Add spouses of descendants (so couples stay together)
-        this.getDescendants(personId).forEach(descendant => {
-            if (descendant.spouseIds) {
-                descendant.spouseIds.forEach(id => lineage.add(id));
-            }
-        });
-
-        return lineage;
-    }
-
-    addPerson(personData) {
-        const person = this.createPerson(personData);
-        this.people.push(person);
-        this.savePersonToFirebase(person);
-        this.saveData();
-        return person;
-    }
-
-    updatePerson(id, personData) {
-        const index = this.people.findIndex(p => p.id === id);
-        if (index !== -1) {
-            // Preserve events if not provided
-            if (!personData.events) {
-                personData.events = this.people[index].events;
-            }
-            this.people[index] = { ...this.people[index], ...personData };
-            this.savePersonToFirebase(this.people[index]);
-            this.saveData();
-        }
-    }
-
-    deletePerson(id) {
-        // Remove references to this person
-        this.people.forEach(p => {
-            if (p.fatherId === id) p.fatherId = null;
-            if (p.motherId === id) p.motherId = null;
-            p.spouseIds = p.spouseIds.filter(sid => sid !== id);
-            // Save updated references to Firebase
-            this.savePersonToFirebase(p);
-        });
-        this.people = this.people.filter(p => p.id !== id);
-
-        if (this.focusedPersonId === id) {
-            this.focusedPersonId = this.people.length > 0 ? this.people[0].id : null;
-        }
-
-        // Delete from Firebase
-        this.deletePersonFromFirebase(id);
-        this.saveData();
-    }
-
-    confirmDeletePerson(id, name) {
-        if (confirm(`Are you sure you want to delete ${name}? This will also remove them from any family relationships. This cannot be undone.`)) {
-            this.deletePerson(id);
-            this.showTree();
-        }
-    }
-
-    addEvent(personId, eventData) {
-        const person = this.getPerson(personId);
-        if (person) {
-            const event = {
-                id: this.generateId(),
-                ...eventData
-            };
-            person.events.push(event);
-            this.savePersonToFirebase(person);
-            this.saveData();
-            return event;
-        }
-        return null;
-    }
-
-    updateEvent(personId, eventId, eventData) {
-        const person = this.getPerson(personId);
-        if (person) {
-            const index = person.events.findIndex(e => e.id === eventId);
-            if (index !== -1) {
-                person.events[index] = { ...person.events[index], ...eventData };
-                this.savePersonToFirebase(person);
-                this.saveData();
-            }
-        }
-    }
-
-    deleteEvent(personId, eventId) {
-        const person = this.getPerson(personId);
-        if (person) {
-            person.events = person.events.filter(e => e.id !== eventId);
-            this.savePersonToFirebase(person);
-            this.saveData();
-        }
-    }
-
-    createChildBirthEvent(parentId, child) {
-        const parent = this.getPerson(parentId);
-        if (!parent) return;
-
-        // Check if a birth event for this child already exists on the parent's timeline
-        const existingEvent = parent.events.find(e =>
-            e.type === 'story' &&
-            e.linkedPersonId === child.id &&
-            e.customTitle?.includes('Birth of')
-        );
-
-        if (existingEvent) return; // Don't duplicate
-
-        // Create a "child's birth" event on the parent's timeline
-        const eventData = {
-            type: 'story',
-            customTitle: `Birth of ${child.name.split(' ')[0]}`,
-            date: child.birthDate,
-            location: child.birthPlace || '',
-            description: `${child.name} was born.`,
-            linkedPersonId: child.id,
-            documents: []
-        };
-
-        this.addEvent(parentId, eventData);
-    }
-
-    exportData() {
-        const dataStr = JSON.stringify(this.people, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'family-tree-data.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    importData(file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                if (Array.isArray(data)) {
-                    this.people = data;
-                    this.focusedPersonId = this.people.length > 0 ? this.people[0].id : null;
-                    this.saveData();
-                    this.render();
-                    alert('Data imported successfully!');
-                } else {
-                    alert('Invalid data format.');
-                }
-            } catch (error) {
-                alert('Error reading file.');
-            }
-        };
-        reader.readAsText(file);
-    }
-
-    importGedcom(file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const gedcomText = e.target.result;
-                const result = this.parseGedcom(gedcomText);
-
-                if (result.people.length === 0) {
-                    alert('No people found in GEDCOM file.');
-                    return;
-                }
-
-                // Ask user if they want to merge or replace
-                const existingCount = this.people.length;
-                let shouldMerge = false;
-
-                if (existingCount > 0) {
-                    shouldMerge = confirm(
-                        `Found ${result.people.length} people in the GEDCOM file.\n\n` +
-                        `You currently have ${existingCount} people in your tree.\n\n` +
-                        `Click OK to ADD the imported people to your existing tree.\n` +
-                        `Click Cancel to REPLACE your tree with the imported data.`
-                    );
-                }
-
-                if (shouldMerge) {
-                    // Add to existing
-                    result.people.forEach(person => {
-                        this.people.push(person);
-                        this.savePersonToFirebase(person);
-                    });
-                } else {
-                    // Replace - clear existing first
-                    if (existingCount > 0) {
-                        this.people.forEach(p => this.deletePersonFromFirebase(p.id));
-                    }
-                    this.people = result.people;
-                    result.people.forEach(person => this.savePersonToFirebase(person));
-                }
-
-                this.focusedPersonId = this.people.length > 0 ? this.people[0].id : null;
-                this.saveData();
-                this.render();
-                this.closeSettingsModal();
-
-                alert(
-                    `GEDCOM import complete!\n\n` +
-                    `Imported ${result.people.length} people.\n` +
-                    `${result.families} families processed.`
-                );
-            } catch (error) {
-                console.error('GEDCOM import error:', error);
-                alert('Error parsing GEDCOM file. Please make sure it\'s a valid .ged file.');
-            }
-        };
-        reader.readAsText(file);
-    }
-
-    parseGedcom(text) {
-        const lines = text.split(/\r?\n/);
-        const individuals = {};
-        const families = {};
-
-        let currentRecord = null;
-        let currentType = null;
-        let currentSubRecord = null;
-
-        // First pass: parse all records
-        for (const line of lines) {
-            const match = line.match(/^(\d+)\s+(@\w+@|\w+)\s*(.*)?$/);
-            if (!match) continue;
-
-            const [, levelStr, tag, value] = match;
-            const level = parseInt(levelStr);
-
-            if (level === 0) {
-                // New record
-                if (tag.startsWith('@') && value === 'INDI') {
-                    currentRecord = { id: tag, events: [] };
-                    currentType = 'INDI';
-                    individuals[tag] = currentRecord;
-                } else if (tag.startsWith('@') && value === 'FAM') {
-                    currentRecord = { id: tag, children: [] };
-                    currentType = 'FAM';
-                    families[tag] = currentRecord;
-                } else {
-                    currentRecord = null;
-                    currentType = null;
-                }
-                currentSubRecord = null;
-            } else if (currentRecord) {
-                if (level === 1) {
-                    currentSubRecord = tag;
-
-                    if (currentType === 'INDI') {
-                        switch (tag) {
-                            case 'NAME':
-                                // Parse name - remove slashes around surname
-                                currentRecord.name = (value || '').replace(/\//g, '').trim();
-                                break;
-                            case 'SEX':
-                                currentRecord.sex = value;
-                                break;
-                            case 'BIRT':
-                            case 'DEAT':
-                            case 'MARR':
-                            case 'BAPM':
-                            case 'BURI':
-                            case 'GRAD':
-                            case 'OCCU':
-                            case 'RESI':
-                            case 'IMMI':
-                            case 'EMIG':
-                            case 'MILI':
-                                currentRecord._currentEvent = { type: tag };
-                                break;
-                            case 'FAMS':
-                                // Spouse family
-                                if (!currentRecord.spouseFamilies) currentRecord.spouseFamilies = [];
-                                currentRecord.spouseFamilies.push(value);
-                                break;
-                            case 'FAMC':
-                                // Child of family
-                                currentRecord.childOfFamily = value;
-                                break;
-                        }
-                    } else if (currentType === 'FAM') {
-                        switch (tag) {
-                            case 'HUSB':
-                                currentRecord.husband = value;
-                                break;
-                            case 'WIFE':
-                                currentRecord.wife = value;
-                                break;
-                            case 'CHIL':
-                                currentRecord.children.push(value);
-                                break;
-                            case 'MARR':
-                                currentRecord._currentEvent = { type: 'MARR' };
-                                break;
-                        }
-                    }
-                } else if (level === 2 && currentRecord._currentEvent) {
-                    // Event details
-                    if (tag === 'DATE') {
-                        currentRecord._currentEvent.date = this.parseGedcomDate(value);
-                    } else if (tag === 'PLAC') {
-                        currentRecord._currentEvent.place = value;
-                    }
-                } else if (level === 2 && currentSubRecord === 'NAME') {
-                    if (tag === 'GIVN') {
-                        currentRecord.givenName = value;
-                    } else if (tag === 'SURN') {
-                        currentRecord.surname = value;
-                    }
-                }
-
-                // Save completed events
-                if (level === 1 && currentRecord._currentEvent && currentRecord._currentEvent.type) {
-                    const evt = currentRecord._currentEvent;
-                    if (evt.type === 'BIRT') {
-                        currentRecord.birthDate = evt.date;
-                        currentRecord.birthPlace = evt.place;
-                    } else if (evt.type === 'DEAT') {
-                        currentRecord.deathDate = evt.date;
-                        currentRecord.deathPlace = evt.place;
-                    } else {
-                        // Add as timeline event
-                        currentRecord.events.push({
-                            gedcomType: evt.type,
-                            date: evt.date,
-                            place: evt.place
-                        });
-                    }
-                    currentRecord._currentEvent = null;
-                }
-            }
-        }
-
-        // Handle last event if file doesn't end with level 0
-        Object.values(individuals).forEach(ind => {
-            if (ind._currentEvent && ind._currentEvent.type) {
-                const evt = ind._currentEvent;
-                if (evt.type === 'BIRT') {
-                    ind.birthDate = evt.date;
-                    ind.birthPlace = evt.place;
-                } else if (evt.type === 'DEAT') {
-                    ind.deathDate = evt.date;
-                    ind.deathPlace = evt.place;
-                }
-            }
-            delete ind._currentEvent;
-        });
-
-        // Second pass: convert to our format and resolve relationships
-        const gedcomIdToNewId = {};
-        const people = [];
-
-        // Create people first
-        Object.values(individuals).forEach(ind => {
-            const newId = this.generateId();
-            gedcomIdToNewId[ind.id] = newId;
-
-            const person = {
-                id: newId,
-                name: ind.name || `${ind.givenName || ''} ${ind.surname || ''}`.trim() || 'Unknown',
-                birthDate: ind.birthDate || null,
-                birthPlace: ind.birthPlace || '',
-                deathDate: ind.deathDate || null,
-                photoUrl: '',
-                biography: '',
-                fatherId: null,
-                motherId: null,
-                spouseIds: [],
-                events: [],
-                documents: []
-            };
-
-            // Convert GEDCOM events to our event types
-            (ind.events || []).forEach(evt => {
-                if (evt.date || evt.place) {
-                    const eventTypeMap = {
-                        'BAPM': 'baptism',
-                        'BURI': 'burial',
-                        'GRAD': 'graduation',
-                        'OCCU': 'occupation',
-                        'RESI': 'residence',
-                        'IMMI': 'immigration',
-                        'EMIG': 'immigration',
-                        'MILI': 'military',
-                        'MARR': 'marriage'
-                    };
-
-                    person.events.push({
-                        id: this.generateId(),
-                        type: eventTypeMap[evt.gedcomType] || 'custom',
-                        date: evt.date || '',
-                        location: evt.place || '',
-                        description: ''
-                    });
-                }
-            });
-
-            // Add birth event if we have birth data
-            if (person.birthDate) {
-                person.events.push({
-                    id: this.generateId(),
-                    type: 'birth',
-                    date: person.birthDate,
-                    location: person.birthPlace || '',
-                    description: ''
-                });
-            }
-
-            // Add death event if we have death data
-            if (person.deathDate) {
-                person.events.push({
-                    id: this.generateId(),
-                    type: 'death',
-                    date: person.deathDate,
-                    location: ind.deathPlace || '',
-                    description: ''
-                });
-            }
-
-            people.push(person);
-            ind._newId = newId;
-        });
-
-        // Resolve family relationships
-        Object.values(families).forEach(fam => {
-            const fatherId = fam.husband ? gedcomIdToNewId[fam.husband] : null;
-            const motherId = fam.wife ? gedcomIdToNewId[fam.wife] : null;
-
-            // Link spouses
-            if (fatherId && motherId) {
-                const father = people.find(p => p.id === fatherId);
-                const mother = people.find(p => p.id === motherId);
-                if (father && !father.spouseIds.includes(motherId)) {
-                    father.spouseIds.push(motherId);
-                }
-                if (mother && !mother.spouseIds.includes(fatherId)) {
-                    mother.spouseIds.push(fatherId);
-                }
-            }
-
-            // Link children to parents
-            fam.children.forEach(childGedcomId => {
-                const childId = gedcomIdToNewId[childGedcomId];
-                const child = people.find(p => p.id === childId);
-                if (child) {
-                    if (fatherId) child.fatherId = fatherId;
-                    if (motherId) child.motherId = motherId;
-                }
-            });
-        });
-
-        return {
-            people,
-            families: Object.keys(families).length
-        };
-    }
-
-    parseGedcomDate(dateStr) {
-        if (!dateStr) return null;
-
-        // Handle various GEDCOM date formats
-        // ABT 1900, BEF 1900, AFT 1900, etc.
-        const cleaned = dateStr
-            .replace(/^(ABT|ABOUT|BEF|BEFORE|AFT|AFTER|EST|CAL|FROM|TO|BET|AND)\s*/gi, '')
-            .trim();
-
-        // Try to parse as "DD MMM YYYY" or "MMM YYYY" or "YYYY"
-        const months = {
-            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
-            'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
-            'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-
-        // Full date: "15 MAR 1900"
-        const fullMatch = cleaned.match(/^(\d{1,2})\s+(\w{3})\s+(\d{4})$/i);
-        if (fullMatch) {
-            const [, day, mon, year] = fullMatch;
-            const month = months[mon.toUpperCase()];
-            if (month) {
-                return `${year}-${month}-${day.padStart(2, '0')}`;
-            }
-        }
-
-        // Month and year: "MAR 1900"
-        const monthYearMatch = cleaned.match(/^(\w{3})\s+(\d{4})$/i);
-        if (monthYearMatch) {
-            const [, mon, year] = monthYearMatch;
-            const month = months[mon.toUpperCase()];
-            if (month) {
-                return `${year}-${month}-01`;
-            }
-        }
-
-        // Year only: "1900"
-        const yearMatch = cleaned.match(/^(\d{4})$/);
-        if (yearMatch) {
-            return `${yearMatch[1]}-01-01`;
-        }
-
-        return null;
-    }
-
-    async clearAllData() {
-        if (confirm('Are you sure you want to delete all data? This cannot be undone.')) {
-            // Delete all people from Firebase
-            for (const person of this.people) {
-                await this.deletePersonFromFirebase(person.id);
-            }
-
-            this.people = [];
-            this.focusedPersonId = null;
-            this.saveData();
-            this.render();
-        }
-    }
-
-    // ==================== Rendering ====================
-
-    setView(view) {
-        this.currentView = view;
-
-        // Update toggle buttons
-        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.view === view);
-        });
-
-        // Update tree class
-        const tree = document.querySelector('.pedigree-tree');
-        if (tree) {
-            tree.classList.toggle('landscape', view === 'landscape');
-        }
-
-        // Redraw connectors for new layout
-        requestAnimationFrame(() => this.drawConnectorLines());
-    }
-
-    // Focus Mode Methods
-    setFocusPerson(personId) {
-        this.focusedPersonId = personId;
-        this.focusMode = true;
-        this.updateFocusIndicator();
-        this.render();
-    }
-
-    setFocusMode(enabled) {
-        this.focusMode = enabled;
-        this.updateFocusIndicator();
-        this.render();
-    }
-
-    updateFocusIndicator() {
-        const indicator = document.getElementById('focusPersonName');
-        const focusBtn = document.getElementById('focusModeBtn');
-        const allBtn = document.getElementById('showAllBtn');
-
-        if (!indicator || !focusBtn || !allBtn) return;
-
-        if (this.focusMode && this.focusedPersonId) {
-            const person = this.getPerson(this.focusedPersonId);
-            indicator.textContent = person ? `${person.name}'s Lineage` : 'Full Tree';
-            focusBtn.classList.add('active');
-            allBtn.classList.remove('active');
-        } else {
-            indicator.textContent = 'Full Tree';
-            focusBtn.classList.remove('active');
-            allBtn.classList.add('active');
-        }
-    }
-
-    render() {
-        this.renderPedigree();
-        // Apply current view class
-        const tree = document.querySelector('.pedigree-tree');
-        if (tree && this.currentView === 'landscape') {
-            tree.classList.add('landscape');
-        }
-        // Draw connector lines after DOM is rendered
-        requestAnimationFrame(() => this.drawConnectorLines());
-    }
-
-    drawConnectorLines() {
-        const container = document.getElementById('pedigreeContainer');
-        const tree = container.querySelector('.pedigree-tree');
-        if (!tree) return;
-
-        // Remove existing SVG overlay
-        const existingSvg = container.querySelector('.pedigree-connectors');
-        if (existingSvg) existingSvg.remove();
-
-        // Create SVG overlay for connectors
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.classList.add('pedigree-connectors');
-        svg.style.position = 'absolute';
-        svg.style.top = '0';
-        svg.style.left = '0';
-        svg.style.width = '100%';
-        svg.style.height = '100%';
-        svg.style.pointerEvents = 'none';
-        svg.style.overflow = 'visible';
-
-        const treeRect = tree.getBoundingClientRect();
-
-        // Get connector color based on theme
-        const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-        const lineColor = isDarkMode ? '#6b7a8a' : '#c8bfb3';
-
-        const isLandscape = this.currentView === 'landscape';
-
-        // Helper to create SVG line
-        const addLine = (x1, y1, x2, y2) => {
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', x1);
-            line.setAttribute('y1', y1);
-            line.setAttribute('x2', x2);
-            line.setAttribute('y2', y2);
-            line.setAttribute('stroke', lineColor);
-            line.setAttribute('stroke-width', '2.5');
-            line.setAttribute('stroke-linecap', 'round');
-            svg.appendChild(line);
-        };
-
-        // Helper to add junction dot
-        const addDot = (cx, cy) => {
-            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('cx', cx);
-            dot.setAttribute('cy', cy);
-            dot.setAttribute('r', '3.5');
-            dot.setAttribute('fill', lineColor);
-            svg.appendChild(dot);
-        };
-
-        // Walk the nested DOM tree — for each family-node with children, draw connectors
-        const familyNodes = tree.querySelectorAll('.family-node');
-        familyNodes.forEach(familyNode => {
-            const childrenContainer = familyNode.querySelector(':scope > .family-children');
-            if (!childrenContainer) return; // no children, skip
-
-            const parentUnit = familyNode.querySelector(':scope > .family-unit');
-            if (!parentUnit) return;
-
-            const parentCards = parentUnit.querySelectorAll('.person-card');
-            if (parentCards.length === 0) return;
-
-            // Get child family-nodes (direct children only)
-            const childNodes = childrenContainer.querySelectorAll(':scope > .family-node');
-            if (childNodes.length === 0) return;
-
-            // Get child family-units (the .family-unit inside each child .family-node)
-            const childUnits = Array.from(childNodes).map(cn =>
-                cn.querySelector(':scope > .family-unit')
-            ).filter(Boolean);
-
-            if (childUnits.length === 0) return;
-
-            // Get parent position
-            const firstParent = parentCards[0];
-            const lastParent = parentCards[parentCards.length - 1];
-            const firstRect = firstParent.getBoundingClientRect();
-            const lastRect = lastParent.getBoundingClientRect();
-
-            if (isLandscape) {
-                // LANDSCAPE: Lines go left-to-right
-                const coupleCenterY = (
-                    (firstRect.top + firstRect.height / 2) +
-                    (lastRect.top + lastRect.height / 2)
-                ) / 2 - treeRect.top;
-
-                const parentRightX = Math.max(firstRect.right, lastRect.right) - treeRect.left;
-
-                // Get child unit positions (center of each child's family-unit)
-                const childPositions = childUnits.map(childUnit => {
-                    const cards = childUnit.querySelectorAll('.person-card');
-                    const fCard = cards[0];
-                    const lCard = cards[cards.length - 1];
-                    const fRect = fCard.getBoundingClientRect();
-                    const lRect = lCard.getBoundingClientRect();
-                    return {
-                        x: fRect.left - treeRect.left,
-                        y: ((fRect.top + fRect.height / 2) + (lRect.top + lRect.height / 2)) / 2 - treeRect.top
-                    };
-                });
-
-                const closestChildX = Math.min(...childPositions.map(c => c.x));
-                const midX = parentRightX + (closestChildX - parentRightX) / 2;
-
-                // 1. Couple extend-line
-                addLine(parentRightX, coupleCenterY, midX, coupleCenterY);
-
-                if (childPositions.length === 1) {
-                    const child = childPositions[0];
-                    if (Math.abs(coupleCenterY - child.y) < 2) {
-                        addLine(midX, coupleCenterY, child.x, child.y);
-                    } else {
-                        addLine(midX, coupleCenterY, midX, child.y);
-                        addLine(midX, child.y, child.x, child.y);
-                        addDot(midX, coupleCenterY);
-                        addDot(midX, child.y);
-                    }
-                } else {
-                    const minY = Math.min(...childPositions.map(c => c.y));
-                    const maxY = Math.max(...childPositions.map(c => c.y));
-                    addLine(midX, minY, midX, maxY);
-                    childPositions.forEach(child => addLine(midX, child.y, child.x, child.y));
-                    addDot(midX, coupleCenterY);
-                    childPositions.forEach(child => addDot(midX, child.y));
-                }
-            } else {
-                // PORTRAIT: Lines go top-to-bottom
-                const coupleCenterX = (
-                    (firstRect.left + firstRect.width / 2) +
-                    (lastRect.left + lastRect.width / 2)
-                ) / 2 - treeRect.left;
-
-                const parentBottomY = Math.max(firstRect.bottom, lastRect.bottom) - treeRect.top;
-
-                // Get child unit positions (center of each child's family-unit)
-                const childPositions = childUnits.map(childUnit => {
-                    const cards = childUnit.querySelectorAll('.person-card');
-                    const fCard = cards[0];
-                    const lCard = cards[cards.length - 1];
-                    const fRect = fCard.getBoundingClientRect();
-                    const lRect = lCard.getBoundingClientRect();
-                    return {
-                        x: ((fRect.left + fRect.width / 2) + (lRect.left + lRect.width / 2)) / 2 - treeRect.left,
-                        y: fRect.top - treeRect.top
-                    };
-                });
-
-                const topChildY = Math.min(...childPositions.map(c => c.y));
-                const midY = parentBottomY + (topChildY - parentBottomY) / 2;
-
-                // 1. Couple drop-line
-                addLine(coupleCenterX, parentBottomY, coupleCenterX, midY);
-
-                if (childPositions.length === 1) {
-                    const child = childPositions[0];
-                    if (Math.abs(coupleCenterX - child.x) < 2) {
-                        addLine(coupleCenterX, midY, child.x, child.y);
-                    } else {
-                        addLine(coupleCenterX, midY, child.x, midY);
-                        addLine(child.x, midY, child.x, child.y);
-                        addDot(coupleCenterX, midY);
-                        addDot(child.x, midY);
-                    }
-                } else {
-                    const minX = Math.min(...childPositions.map(c => c.x));
-                    const maxX = Math.max(...childPositions.map(c => c.x));
-                    addLine(minX, midY, maxX, midY);
-                    childPositions.forEach(child => addLine(child.x, midY, child.x, child.y));
-                    addDot(coupleCenterX, midY);
-                    childPositions.forEach(child => addDot(child.x, midY));
-                }
-            }
-        });
-
-        tree.style.position = 'relative';
-        tree.appendChild(svg);
-    }
-
-    renderFamilyNode(node, depth, nodeIndex) {
-        let html = '<div class="family-node">';
-
-        // Render the family unit (couple or single person)
-        html += '<div class="family-unit">';
-
-        if (node.person1) {
-            html += this.renderPersonCard(node.person1, false, depth, nodeIndex * 2);
-        }
-
-        if (node.person1 && node.person2) {
-            html += '<div class="spouse-connector"></div>';
-        }
-
-        if (node.person2) {
-            html += this.renderPersonCard(node.person2, false, depth, nodeIndex * 2 + 1);
-        }
-
-        html += '</div>'; // end .family-unit
-
-        // Render children recursively
-        if (node.children && node.children.length > 0) {
-            html += '<div class="family-children">';
-            node.children.forEach((childNode, childIndex) => {
-                html += this.renderFamilyNode(childNode, depth + 1, childIndex);
-            });
-            html += '</div>';
-        }
-
-        html += '</div>'; // end .family-node
-        return html;
-    }
-
-    renderPedigree() {
-        const container = document.getElementById('pedigreeContainer');
-
-        // Update focus indicator
-        this.updateFocusIndicator();
-
-        if (this.people.length === 0) {
-            container.innerHTML = this.renderEmptyState();
-            return;
-        }
-
-        // Build family tree (returns array of root-level tree nodes)
-        const rootTrees = this.buildFamilyTree();
-
-        console.log('Family tree roots:', rootTrees.length, 'Total people:', this.people.length);
-
-        // Render recursive nested pedigree
-        let html = '<div class="pedigree-tree">';
-
-        rootTrees.forEach((tree, treeIndex) => {
-            const sectionClass = tree.isDisconnected
-                ? 'family-tree-section disconnected-section'
-                : 'family-tree-section';
-            html += `<div class="${sectionClass}">`;
-            html += this.renderFamilyNode(tree, 0, treeIndex);
-            html += '</div>';
-        });
-
-        html += '</div>';
-
-        container.innerHTML = html;
-    }
-
-    buildFamilyTree() {
-        // Focus Mode: If enabled, only show people in the focused person's lineage
-        const allowedIds = this.focusMode && this.focusedPersonId
-            ? this.getFocusedLineage(this.focusedPersonId)
-            : null;
-
-        // Helper to check if person is allowed (in lineage or focus mode is off)
-        const isAllowed = (person) => !allowedIds || allowedIds.has(person.id);
-
-        // Step 1: Find TRUE root ancestors
-        // A root is someone who has no parents AND whose spouse (if any) also has no parents
-        // This prevents in-laws from appearing at the top level
-
-        const peopleWithChildren = new Set();
-        this.people.forEach(p => {
-            if (p.fatherId) peopleWithChildren.add(p.fatherId);
-            if (p.motherId) peopleWithChildren.add(p.motherId);
-        });
-
-        // Helper: does this person have parents in the system?
-        const hasParentsInSystem = (person) => {
-            return (person.fatherId && this.getPerson(person.fatherId)) ||
-                   (person.motherId && this.getPerson(person.motherId));
-        };
-
-        // Helper: does this person's spouse have parents?
-        const spouseHasParents = (person) => {
-            if (!person.spouseIds || person.spouseIds.length === 0) return false;
-            return person.spouseIds.some(spouseId => {
-                const spouse = this.getPerson(spouseId);
-                return spouse && hasParentsInSystem(spouse);
-            });
-        };
-
-        const rootAncestors = this.people.filter(p => {
-            if (!isAllowed(p)) return false;
-
-            if (allowedIds) {
-                // FOCUS MODE: root = no parents within the lineage
-                const fatherInLineage = p.fatherId && allowedIds.has(p.fatherId);
-                const motherInLineage = p.motherId && allowedIds.has(p.motherId);
-                if (fatherInLineage || motherInLineage) return false;
-
-                // Skip if ALL spouses have parents in lineage (person will be reached through spouse's family)
-                if (p.spouseIds && p.spouseIds.length > 0) {
-                    const allSpousesHaveParentsInLineage = p.spouseIds.every(spouseId => {
-                        if (!allowedIds.has(spouseId)) return false;
-                        const spouse = this.getPerson(spouseId);
-                        if (!spouse) return false;
-                        return (spouse.fatherId && allowedIds.has(spouse.fatherId)) ||
-                               (spouse.motherId && allowedIds.has(spouse.motherId));
-                    });
-                    if (allSpousesHaveParentsInLineage) return false;
-                }
-            } else {
-                // NORMAL MODE: must have no parents in the system
-                if (hasParentsInSystem(p)) return false;
-                // Only exclude if ALL spouses have parents (person will be pulled in through spouse's family)
-                if (p.spouseIds && p.spouseIds.length > 0) {
-                    const allSpousesHaveParents = p.spouseIds.every(spouseId => {
-                        const spouse = this.getPerson(spouseId);
-                        return spouse && hasParentsInSystem(spouse);
-                    });
-                    if (allSpousesHaveParents) return false;
-                }
-            }
-
-            return true;
-        });
-
-        if (rootAncestors.length === 0 && this.people.length > 0) {
-            if (allowedIds && this.focusedPersonId) {
-                // Focus mode fallback: use the focused person as root
-                const focused = this.getPerson(this.focusedPersonId);
-                if (focused) return [{ person1: focused, person2: null, children: [] }];
-            }
-            return [{ person1: this.people[0], person2: null, children: [] }];
-        }
-
-        // Step 2: Group root ancestors - but don't pair with spouses who aren't roots
-        const processedIds = new Set();
-        const rootUnits = [];
-
-        rootAncestors.forEach(person => {
-            if (processedIds.has(person.id)) return;
-            processedIds.add(person.id);
-
-            // Only pair with spouse if spouse is also a root ancestor
-            let spouse = null;
-            if (person.spouseIds && person.spouseIds.length > 0) {
-                for (const spouseId of person.spouseIds) {
-                    const potentialSpouse = this.getPerson(spouseId);
-                    if (potentialSpouse && rootAncestors.find(r => r.id === spouseId) && !processedIds.has(spouseId)) {
-                        spouse = potentialSpouse;
-                        processedIds.add(spouseId);
-                        break;
-                    }
-                }
-            }
-
-            rootUnits.push({ person1: person, person2: spouse });
-        });
-
-        // Step 3: Build tree recursively downward from roots
-        const allProcessedIds = new Set(processedIds);
-
-        const buildSubtree = (unit) => {
-            const parentIds = [unit.person1?.id, unit.person2?.id].filter(Boolean);
-
-            // Find children of this couple/person
-            const children = this.people.filter(p =>
-                !allProcessedIds.has(p.id) &&
-                isAllowed(p) &&
-                ((p.fatherId && parentIds.includes(p.fatherId)) ||
-                 (p.motherId && parentIds.includes(p.motherId)))
-            );
-
-            // Sort by birth date for consistent ordering
-            children.sort((a, b) => (a.birthDate || '').localeCompare(b.birthDate || ''));
-
-            unit.children = [];
-
-            children.forEach(child => {
-                if (allProcessedIds.has(child.id)) return;
-                allProcessedIds.add(child.id);
-
-                // Find spouse for this child
-                let childSpouse = null;
-                if (child.spouseIds && child.spouseIds.length > 0) {
-                    for (const spouseId of child.spouseIds) {
-                        if (!allProcessedIds.has(spouseId)) {
-                            const potentialSpouse = this.getPerson(spouseId);
-                            if (potentialSpouse && isAllowed(potentialSpouse)) {
-                                childSpouse = potentialSpouse;
-                                allProcessedIds.add(spouseId);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                const childNode = { person1: child, person2: childSpouse, children: [] };
-                unit.children.push(childNode);
-            });
-
-            // Recurse into each child node
-            unit.children.forEach(childNode => buildSubtree(childNode));
-        };
-
-        // Build subtree for each root unit
-        rootUnits.forEach(unit => {
-            unit.children = [];
-            buildSubtree(unit);
-        });
-
-        // Step 4: Handle anyone not yet in tree (truly disconnected)
-        // Skip this in focus mode - we only want the lineage
-        if (this.focusMode) {
-            return rootUnits;
-        }
-
-        const disconnected = this.people.filter(p => !allProcessedIds.has(p.id));
-        if (disconnected.length > 0) {
-            const disconnectedProcessed = new Set();
-
-            disconnected.forEach(person => {
-                if (disconnectedProcessed.has(person.id)) return;
-                disconnectedProcessed.add(person.id);
-
-                let spouse = null;
-                if (person.spouseIds && person.spouseIds.length > 0) {
-                    for (const spouseId of person.spouseIds) {
-                        if (!disconnectedProcessed.has(spouseId) && !allProcessedIds.has(spouseId)) {
-                            spouse = this.getPerson(spouseId);
-                            if (spouse) {
-                                disconnectedProcessed.add(spouseId);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                rootUnits.push({ person1: person, person2: spouse, children: [], isDisconnected: true });
-            });
-        }
-
-        return rootUnits;
-    }
-
-    buildAncestorTree(person, maxGenerations) {
-        const generations = [[person]];
-
-        for (let gen = 1; gen < maxGenerations; gen++) {
-            const prevGen = generations[gen - 1];
-            const thisGen = [];
-
-            prevGen.forEach(p => {
-                if (p) {
-                    const father = p.fatherId ? this.getPerson(p.fatherId) : null;
-                    const mother = p.motherId ? this.getPerson(p.motherId) : null;
-                    thisGen.push(father, mother);
-                } else {
-                    thisGen.push(null, null);
-                }
-            });
-
-            // Only add generation if there's at least one person
-            if (thisGen.some(p => p !== null)) {
-                generations.push(thisGen);
-            } else {
-                break;
-            }
-        }
-
-        return generations;
-    }
-
-    renderPersonCard(person, isFocused = false, genIndex = 0, personIndex = 0) {
-        const dates = this.formatLifeDates(person);
-        const initials = this.getInitials(person.name);
-        const photoHtml = person.photoUrl
-            ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span style="display:none">${initials}</span>`
-            : initials;
-
-        // Determine which quick-add buttons to show
-        const hasParents = person.fatherId || person.motherId;
-        const hasSpouse = person.spouseIds && person.spouseIds.length > 0;
-
-        // Check if person is disconnected (no family connections)
-        const isDisconnected = this.isPersonDisconnected(person);
-        const disconnectedClass = isDisconnected ? ' disconnected' : '';
-
-        // Check if this is the focus root
-        const isFocusRoot = this.focusMode && person.id === this.focusedPersonId;
-        const focusRootClass = isFocusRoot ? ' is-focus-root' : '';
-
-        // Check if person has children (for connector line indicators)
-        const hasChildren = this.getChildren(person.id).length > 0;
-
-        // Format birthplace for display
-        const birthplaceHtml = person.birthPlace
-            ? `<div class="birthplace">${person.birthPlace}</div>`
-            : '';
-
-        return `
-            <div class="person-card${disconnectedClass}${focusRootClass}" data-person-id="${person.id}" data-gen="${genIndex}" data-index="${personIndex}" ${hasChildren ? 'data-has-children="true"' : ''} ${hasParents ? 'data-has-parents="true"' : ''} onclick="app.showTimeline('${person.id}')">
-                <button class="quick-add-btn quick-add-top" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'parent')" title="Add Parent">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </button>
-                ${!hasSpouse ? `
-                <button class="quick-add-btn quick-add-right" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'spouse')" title="Add Spouse">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </button>
-                ` : ''}
-                <button class="quick-add-btn quick-add-bottom" onclick="event.stopPropagation(); app.quickAddRelative('${person.id}', 'child')" title="Add Child">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </button>
-                <div class="card-actions">
-                    <button class="card-action-btn focus-btn" onclick="event.stopPropagation(); app.setFocusPerson('${person.id}')" title="Focus on this person">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-                        </svg>
-                    </button>
-                    <button class="card-action-btn" onclick="event.stopPropagation(); app.openPersonModal('${person.id}')" title="Edit">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="avatar">${photoHtml}</div>
-                <div class="name">${person.name}</div>
-                <div class="dates">${dates}</div>
-                ${birthplaceHtml}
-            </div>
-        `;
-    }
-
-    // Check if a person has no family connections
-    isPersonDisconnected(person) {
-        const hasParent = (person.fatherId && this.getPerson(person.fatherId)) ||
-                          (person.motherId && this.getPerson(person.motherId));
-        const hasSpouse = person.spouseIds && person.spouseIds.some(id => this.getPerson(id));
-        const hasChildren = this.getChildren(person.id).length > 0;
-
-        return !hasParent && !hasSpouse && !hasChildren;
-    }
-
-    renderEmptySlot(generation, child = null, isFatherSlot = true) {
-        // Don't render empty slots - keep the tree view clean
-        // Users can add people via the "Add Person" button and connect them through the form
-        return '';
-    }
-
-    renderEmptyState() {
-        return `
-            <div class="pedigree-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                    <circle cx="9" cy="7" r="4"/>
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                </svg>
-                <h2>Start Your Family Tree</h2>
-                <p>Add your first family member to begin exploring your ancestry.</p>
-                <button class="btn btn-primary" onclick="app.openPersonModal()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px">
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                    Add First Person
-                </button>
-            </div>
-        `;
-    }
-
-    // ==================== Timeline View ====================
-
-    showTimeline(personId) {
-        this.currentPersonId = personId;
-        const person = this.getPerson(personId);
-        if (!person) return;
-
-        document.getElementById('pedigreeView').classList.add('hidden');
-        document.getElementById('timelineView').classList.remove('hidden');
-        window.scrollTo(0, 0);
-
-        this.renderPersonHeader(person);
-        this.renderTimelineEvents(person);
-        this.renderPhotoGallery(person);
-    }
-
-    renderPhotoGallery(person) {
-        // Collect all photos from person's documents and event documents
-        const allPhotos = [];
-
-        // Add person's general documents that are images
-        if (person.documents) {
-            person.documents.forEach(doc => {
-                if (this.isImageUrl(doc.url)) {
-                    allPhotos.push({
-                        url: doc.url,
-                        label: doc.label || 'Photo',
-                        source: 'General Documents'
-                    });
-                }
-            });
-        }
-
-        // Add profile photo if exists
-        if (person.photoUrl && this.isImageUrl(person.photoUrl)) {
-            // Don't add duplicate if already in documents
-            const isInDocs = allPhotos.some(p => p.url === person.photoUrl);
-            if (!isInDocs) {
-                allPhotos.unshift({
-                    url: person.photoUrl,
-                    label: 'Profile Photo',
-                    source: 'Profile'
-                });
-            }
-        }
-
-        // Add photos from events
-        person.events.forEach(event => {
-            if (event.documents) {
-                event.documents.forEach(doc => {
-                    if (this.isImageUrl(doc.url)) {
-                        const eventType = this.eventTypes[event.type] || this.eventTypes.custom;
-                        const eventTitle = event.customTitle || eventType.label;
-                        allPhotos.push({
-                            url: doc.url,
-                            label: doc.label || 'Photo',
-                            source: eventTitle,
-                            eventDate: event.date
-                        });
-                    }
-                });
-            }
-        });
-
-        // Find or create gallery container
-        let galleryContainer = document.getElementById('photoGallerySection');
-        if (!galleryContainer) {
-            galleryContainer = document.createElement('div');
-            galleryContainer.id = 'photoGallerySection';
-            document.getElementById('timelineContent').after(galleryContainer);
-        }
-
-        if (allPhotos.length === 0) {
-            galleryContainer.innerHTML = '';
-            return;
-        }
-
-        galleryContainer.innerHTML = `
-            <div class="photo-gallery-section">
-                <div class="gallery-header">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                        <circle cx="8.5" cy="8.5" r="1.5"/>
-                        <polyline points="21 15 16 10 5 21"/>
-                    </svg>
-                    <span>Photo Gallery (${allPhotos.length})</span>
-                </div>
-                <div class="photo-gallery-grid">
-                    ${allPhotos.map(photo => `
-                        <div class="gallery-photo" onclick="app.openDocument('${encodeURIComponent(photo.url)}', '${encodeURIComponent(photo.label)}')">
-                            <img src="${photo.url}" alt="${photo.label}" onerror="this.parentElement.style.display='none'">
-                            <div class="gallery-photo-overlay">
-                                <span class="gallery-photo-label">${photo.label}</span>
-                                <span class="gallery-photo-source">${photo.source}</span>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    hideTimeline() {
-        document.getElementById('timelineView').classList.add('hidden');
-        document.getElementById('pedigreeView').classList.remove('hidden');
-        this.currentPersonId = null;
-    }
-
-    renderPersonHeader(person) {
-        const container = document.getElementById('personHeader');
-        const initials = this.getInitials(person.name);
-        const dates = this.formatLifeDates(person);
-
-        const photoHtml = person.photoUrl
-            ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span style="display:none">${initials}</span>`
-            : initials;
-
-        // Get family members
-        const father = person.fatherId ? this.getPerson(person.fatherId) : null;
-        const mother = person.motherId ? this.getPerson(person.motherId) : null;
-        const spouses = person.spouseIds.map(id => this.getPerson(id)).filter(Boolean);
-        const children = this.getChildren(person.id);
-        const siblings = this.getSiblings(person.id);
-
-        // Build family section (FamilySearch style)
-        let familySectionHtml = '<div class="family-section">';
-
-        // Parents row
-        familySectionHtml += `
-            <div class="family-category">
-                <div class="family-category-header">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                    </svg>
-                    <span>Parents</span>
-                </div>
-                <div class="family-members">
-                    ${father ? this.renderFamilyMemberCard(father, 'Father') : this.renderAddFamilyMember('father', person.id)}
-                    ${mother ? this.renderFamilyMemberCard(mother, 'Mother') : this.renderAddFamilyMember('mother', person.id)}
-                </div>
-            </div>
-        `;
-
-        // Spouse row
-        familySectionHtml += `
-            <div class="family-category">
-                <div class="family-category-header">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                    </svg>
-                    <span>Spouse</span>
-                </div>
-                <div class="family-members">
-                    ${spouses.length > 0 ? spouses.map(s => this.renderFamilyMemberCard(s, 'Spouse')).join('') : this.renderAddFamilyMember('spouse', person.id)}
-                </div>
-            </div>
-        `;
-
-        // Siblings row (only show if there are siblings or could be)
-        if (siblings.length > 0 || father || mother) {
-            familySectionHtml += `
-                <div class="family-category">
-                    <div class="family-category-header">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                        <span>Siblings</span>
-                    </div>
-                    <div class="family-members">
-                        ${siblings.length > 0 ? siblings.map(s => this.renderFamilyMemberCard(s, 'Sibling')).join('') : '<span class="no-family-members">No siblings recorded</span>'}
-                    </div>
-                </div>
-            `;
-        }
-
-        // Children row
-        familySectionHtml += `
-            <div class="family-category">
-                <div class="family-category-header">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="4" r="2"/>
-                        <path d="M12 6v6"/>
-                        <circle cx="12" cy="14" r="2"/>
-                        <path d="M8 18h8"/>
-                        <path d="M8 18v3"/>
-                        <path d="M16 18v3"/>
-                    </svg>
-                    <span>Children</span>
-                </div>
-                <div class="family-members">
-                    ${children.length > 0 ? children.map(c => this.renderFamilyMemberCard(c, 'Child')).join('') : '<span class="no-family-members">No children recorded</span>'}
-                </div>
-            </div>
-        `;
-
-        familySectionHtml += '</div>';
-
-        // Build documents section if person has general documents
-        let documentsHtml = '';
-        if (person.documents && person.documents.length > 0) {
-            documentsHtml = `
-                <div class="person-documents-section">
-                    <div class="documents-header">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                        </svg>
-                        <span>Documents & Photos</span>
-                    </div>
-                    <div class="person-documents-grid">
-                        ${person.documents.map(doc => {
-                            const isImage = this.isImageUrl(doc.url);
-                            if (isImage) {
-                                return `
-                                    <div class="person-doc-item" onclick="app.openDocument('${encodeURIComponent(doc.url)}', '${encodeURIComponent(doc.label || 'Document')}')">
-                                        <img src="${doc.url}" alt="${doc.label || 'Photo'}" onerror="this.parentElement.style.display='none'">
-                                        ${doc.label ? `<span class="doc-label">${doc.label}</span>` : ''}
-                                    </div>
-                                `;
-                            } else {
-                                return `
-                                    <a class="person-doc-link" href="${doc.url}" target="_blank">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                            <polyline points="14 2 14 8 20 8"/>
-                                        </svg>
-                                        <span>${doc.label || 'Document'}</span>
-                                    </a>
-                                `;
-                            }
-                        }).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        // Hero background: blurred photo or warm gradient
-        const heroBgHtml = person.photoUrl
-            ? `<div class="person-hero-bg">
-                    <img src="${person.photoUrl}" alt="" onerror="this.parentElement.classList.add('no-photo')">
-                    <div class="hero-gradient-overlay"></div>
-               </div>`
-            : `<div class="person-hero-bg no-photo">
-                    <div class="hero-gradient-overlay"></div>
-               </div>`;
-
-        // Hero avatar (larger version)
-        const heroAvatarHtml = person.photoUrl
-            ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span class="hero-initials" style="display:none">${initials}</span>`
-            : `<span class="hero-initials">${initials}</span>`;
-
-        container.innerHTML = `
-            <div class="person-hero">
-                ${heroBgHtml}
-                <div class="person-hero-content">
-                    <div class="person-hero-avatar">${heroAvatarHtml}</div>
-                    <h1 class="person-hero-name">${person.name}</h1>
-                    ${dates ? `<p class="person-hero-dates">${dates}</p>` : ''}
-                    ${person.birthPlace ? `<p class="person-hero-birthplace">${person.birthPlace}</p>` : ''}
-                    <div class="person-hero-actions">
-                        <button class="btn-hero" onclick="app.openPersonModal('${person.id}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                            </svg>
-                            Edit
-                        </button>
-                        <button class="btn-hero btn-hero-danger" onclick="app.confirmDeletePerson('${person.id}', '${person.name.replace(/'/g, "\\'")}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                            Delete
-                        </button>
-                    </div>
-                </div>
-            </div>
-            ${person.biography ? `
-                <div class="person-biography-section">
-                    <p class="person-biography-text">${person.biography}</p>
-                </div>
-            ` : ''}
-            ${familySectionHtml}
-            ${documentsHtml}
-        `;
-    }
-
-    renderFamilyMemberCard(person, relationship) {
-        const initials = this.getInitials(person.name);
-        const dates = this.formatLifeDates(person);
-        const photoHtml = person.photoUrl
-            ? `<img src="${person.photoUrl}" alt="${person.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><span style="display:none">${initials}</span>`
-            : initials;
-
-        return `
-            <div class="family-member-card" onclick="app.showTimeline('${person.id}')">
-                <div class="family-member-avatar">${photoHtml}</div>
-                <div class="family-member-info">
-                    <span class="family-member-name">${person.name}</span>
-                    <span class="family-member-dates">${dates}</span>
-                </div>
-            </div>
-        `;
-    }
-
-    renderAddFamilyMember(type, personId) {
-        return `
-            <div class="add-family-member" onclick="app.openAddFamilyMemberModal('${type}', '${personId}')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"/>
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                <span>Add ${type.charAt(0).toUpperCase() + type.slice(1)}</span>
-            </div>
-        `;
-    }
-
-    openAddFamilyMemberModal(type, personId) {
-        const person = this.getPerson(personId);
-        const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
-
-        // Get list of potential people to link (exclude self and already-linked people)
-        let availablePeople = this.people.filter(p => p.id !== personId);
-
-        // For parents, exclude people who are already set as that parent type
-        if (type === 'father' && person.fatherId) {
-            availablePeople = availablePeople.filter(p => p.id !== person.fatherId);
-        }
-        if (type === 'mother' && person.motherId) {
-            availablePeople = availablePeople.filter(p => p.id !== person.motherId);
-        }
-        if (type === 'spouse') {
-            availablePeople = availablePeople.filter(p => !person.spouseIds.includes(p.id));
-        }
-
-        if (availablePeople.length === 0) {
-            // No existing people to link, just open create new
-            this.openPersonModal(null);
-            setTimeout(() => {
-                if (type === 'father' || type === 'mother') {
-                    document.getElementById('personForm').dataset.addAsParentTo = personId;
-                    document.getElementById('personForm').dataset.parentType = type;
-                } else if (type === 'spouse') {
-                    document.getElementById('personForm').dataset.addAsSpouseTo = personId;
-                }
-            }, 100);
-            return;
-        }
-
-        // Show a choice modal: link existing or create new
-        const choiceHtml = `
-            <div class="link-choice-modal">
-                <h3>Add ${typeLabel} for ${person.name.split(' ')[0]}</h3>
-                <div class="link-choice-options">
-                    <div class="link-choice-section">
-                        <h4>Link Existing Person</h4>
-                        <select id="linkExistingPerson" class="link-person-select">
-                            <option value="">-- Select a person --</option>
-                            ${availablePeople.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
-                        </select>
-                        <button class="btn btn-primary" onclick="app.linkExistingPerson('${type}', '${personId}')">Link Selected Person</button>
-                    </div>
-                    <div class="link-choice-divider">
-                        <span>OR</span>
-                    </div>
-                    <div class="link-choice-section">
-                        <h4>Create New Person</h4>
-                        <button class="btn btn-secondary" onclick="app.createNewFamilyMember('${type}', '${personId}')">Create New ${typeLabel}</button>
-                    </div>
-                </div>
-                <button class="btn btn-text link-choice-cancel" onclick="app.closeLinkChoiceModal()">Cancel</button>
-            </div>
-        `;
-
-        // Create overlay
-        const overlay = document.createElement('div');
-        overlay.id = 'linkChoiceOverlay';
-        overlay.className = 'modal-overlay active';
-        overlay.innerHTML = `<div class="modal">${choiceHtml}</div>`;
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                this.closeLinkChoiceModal();
-            }
-        });
-    }
-
-    closeLinkChoiceModal() {
-        const overlay = document.getElementById('linkChoiceOverlay');
-        if (overlay) {
-            overlay.remove();
-        }
-    }
-
-    quickAddRelative(personId, relationshipType) {
-        // Map generic types to specific relationship types
-        if (relationshipType === 'parent') {
-            // Ask which parent type
-            const person = this.getPerson(personId);
-            if (!person.fatherId && !person.motherId) {
-                // No parents yet - show choice
-                this.showParentTypeChoice(personId);
-            } else if (!person.fatherId) {
-                this.openAddFamilyMemberModal('father', personId);
-            } else if (!person.motherId) {
-                this.openAddFamilyMemberModal('mother', personId);
-            } else {
-                alert('This person already has both parents assigned.');
-            }
-        } else if (relationshipType === 'spouse') {
-            this.openAddFamilyMemberModal('spouse', personId);
-        } else if (relationshipType === 'child') {
-            this.openAddChildModal(personId);
-        }
-    }
-
-    showParentTypeChoice(personId) {
-        const person = this.getPerson(personId);
-        const overlay = document.createElement('div');
-        overlay.id = 'parentTypeOverlay';
-        overlay.className = 'modal-overlay active';
-        overlay.innerHTML = `
-            <div class="modal">
-                <div class="link-choice-modal">
-                    <h3>Add Parent for ${person.name.split(' ')[0]}</h3>
-                    <div class="link-choice-options" style="flex-direction: row; gap: 12px;">
-                        <button class="btn btn-primary" onclick="app.closeParentTypeChoice(); app.openAddFamilyMemberModal('father', '${personId}')">
-                            Add Father
-                        </button>
-                        <button class="btn btn-primary" onclick="app.closeParentTypeChoice(); app.openAddFamilyMemberModal('mother', '${personId}')">
-                            Add Mother
-                        </button>
-                    </div>
-                    <button class="btn btn-text link-choice-cancel" onclick="app.closeParentTypeChoice()">Cancel</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) this.closeParentTypeChoice();
-        });
-    }
-
-    closeParentTypeChoice() {
-        const overlay = document.getElementById('parentTypeOverlay');
-        if (overlay) overlay.remove();
-    }
-
-    openAddChildModal(personId) {
-        const person = this.getPerson(personId);
-
-        // Get potential children (people not already linked as children)
-        const existingChildIds = this.people
-            .filter(p => p.fatherId === personId || p.motherId === personId)
-            .map(p => p.id);
-
-        let availablePeople = this.people.filter(p =>
-            p.id !== personId &&
-            !existingChildIds.includes(p.id) &&
-            !person.spouseIds?.includes(p.id)
-        );
-
-        const choiceHtml = `
-            <div class="link-choice-modal">
-                <h3>Add Child for ${person.name.split(' ')[0]}</h3>
-                <div class="link-choice-options">
-                    ${availablePeople.length > 0 ? `
-                    <div class="link-choice-section">
-                        <h4>Link Existing Person</h4>
-                        <select id="linkExistingChild" class="link-person-select">
-                            <option value="">-- Select a person --</option>
-                            ${availablePeople.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
-                        </select>
-                        <button class="btn btn-primary" onclick="app.linkExistingChild('${personId}')">Link as Child</button>
-                    </div>
-                    <div class="link-choice-divider">
-                        <span>OR</span>
-                    </div>
-                    ` : ''}
-                    <div class="link-choice-section">
-                        <h4>Create New Person</h4>
-                        <button class="btn btn-secondary" onclick="app.createNewChild('${personId}')">Create New Child</button>
-                    </div>
-                </div>
-                <button class="btn btn-text link-choice-cancel" onclick="app.closeAddChildModal()">Cancel</button>
-            </div>
-        `;
-
-        const overlay = document.createElement('div');
-        overlay.id = 'addChildOverlay';
-        overlay.className = 'modal-overlay active';
-        overlay.innerHTML = `<div class="modal">${choiceHtml}</div>`;
-        document.body.appendChild(overlay);
-
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) this.closeAddChildModal();
-        });
-    }
-
-    closeAddChildModal() {
-        const overlay = document.getElementById('addChildOverlay');
-        if (overlay) overlay.remove();
-    }
-
-    linkExistingChild(parentId) {
-        const selectedId = document.getElementById('linkExistingChild').value;
-        if (!selectedId) {
-            alert('Please select a person to link.');
-            return;
-        }
-
-        const parent = this.getPerson(parentId);
-        const child = this.getPerson(selectedId);
-
-        // Determine if this parent is father or mother based on existing data or spouse
-        // For simplicity, check if the parent has a spouse and assign accordingly
-        // Or just ask...
-        const isFather = !child.fatherId;
-
-        if (isFather) {
-            child.fatherId = parentId;
-        } else {
-            child.motherId = parentId;
-        }
-
-        this.updatePerson(selectedId, child);
-        this.closeAddChildModal();
-        this.render();
-    }
-
-    createNewChild(parentId) {
-        this.closeAddChildModal();
-        this.openPersonModal(null);
-
-        // Set the parent after the modal opens
-        setTimeout(() => {
-            const parent = this.getPerson(parentId);
-            // If parent has a spouse, pre-fill both parents
-            if (parent.spouseIds && parent.spouseIds.length > 0) {
-                const spouseId = parent.spouseIds[0];
-                const spouse = this.getPerson(spouseId);
-
-                // Determine which is father/mother (basic heuristic)
-                document.getElementById('fatherId').value = parentId;
-                document.getElementById('motherId').value = spouseId;
-            } else {
-                // Just set this person as a parent
-                document.getElementById('fatherId').value = parentId;
-            }
-        }, 100);
-    }
-
-    linkExistingPerson(type, personId) {
-        const select = document.getElementById('linkExistingPerson');
-        const selectedId = select.value;
-
-        if (!selectedId) {
-            alert('Please select a person to link');
-            return;
-        }
-
-        const person = this.getPerson(personId);
-        const linkedPerson = this.getPerson(selectedId);
-
-        if (type === 'father') {
-            person.fatherId = selectedId;
-            this.savePersonToFirebase(person);
-        } else if (type === 'mother') {
-            person.motherId = selectedId;
-            this.savePersonToFirebase(person);
-        } else if (type === 'spouse') {
-            // Add to both people's spouse lists
-            if (!person.spouseIds.includes(selectedId)) {
-                person.spouseIds.push(selectedId);
-                this.savePersonToFirebase(person);
-            }
-            if (!linkedPerson.spouseIds.includes(personId)) {
-                linkedPerson.spouseIds.push(personId);
-                this.savePersonToFirebase(linkedPerson);
-            }
-        }
-
-        this.saveData();
-        this.closeLinkChoiceModal();
-
-        // Refresh the current view
-        if (this.currentPersonId === personId) {
-            this.showTimeline(personId);
-        }
-        this.render();
-    }
-
-    createNewFamilyMember(type, personId) {
-        this.closeLinkChoiceModal();
-        this.openPersonModal(null);
-
-        setTimeout(() => {
-            if (type === 'father' || type === 'mother') {
-                document.getElementById('personForm').dataset.addAsParentTo = personId;
-                document.getElementById('personForm').dataset.parentType = type;
-            } else if (type === 'spouse') {
-                document.getElementById('personForm').dataset.addAsSpouseTo = personId;
-            }
-        }, 100);
-    }
-
-    renderTimelineEvents(person) {
-        const container = document.getElementById('timelineContent');
-
-        // Sort events by date
-        const sortedEvents = [...person.events].sort((a, b) => {
-            if (!a.date) return 1;
-            if (!b.date) return -1;
-            return new Date(a.date) - new Date(b.date);
-        });
-
-        if (sortedEvents.length === 0) {
-            container.innerHTML = `
-                <div class="timeline-empty">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
-                        <circle cx="12" cy="12" r="10"/>
-                        <polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                    <h3>No life events recorded yet</h3>
-                    <p>Start by adding birth and death dates, then fill in the story of ${person.name.split(' ')[0]}'s life in between.</p>
-                    <div class="timeline-empty-actions">
-                        <button class="btn btn-primary" onclick="app.openEventModal('${person.id}', null, 'birth')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                            </svg>
-                            Add Birth
-                        </button>
-                        <button class="btn btn-secondary" onclick="app.openEventModal('${person.id}')">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                                <line x1="12" y1="5" x2="12" y2="19"/>
-                                <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Add Other Event
-                        </button>
-                    </div>
-                    <p class="timeline-empty-hint">
-                        <strong>Tip:</strong> Important events to consider adding: education, marriage, career milestones, residences, and family stories.
-                    </p>
-                </div>
-            `;
-            return;
-        }
-
-        const lifespan = person.birthDate && person.deathDate
-            ? `${new Date(person.birthDate).getFullYear()} \u2013 ${new Date(person.deathDate).getFullYear()}`
-            : person.birthDate
-                ? `Born ${new Date(person.birthDate).getFullYear()}`
-                : '';
-
-        // Build vertical story-card timeline
-        let cardsHtml = '';
-        sortedEvents.forEach((event, index) => {
-            cardsHtml += this.renderStoryCard(event, person.id, index, sortedEvents.length);
-        });
-
-        container.innerHTML = `
-            <div class="vertical-timeline">
-                <div class="vertical-timeline-header">
-                    <div class="vertical-timeline-title">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polyline points="12 6 12 12 16 14"/>
-                        </svg>
-                        <span>Life Story</span>
-                        ${lifespan ? `<span class="timeline-lifespan">${lifespan}</span>` : ''}
-                    </div>
-                    <button class="btn btn-primary btn-small" onclick="app.openEventModal('${person.id}')">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
-                            <line x1="12" y1="5" x2="12" y2="19"/>
-                            <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
-                        Add Event
-                    </button>
-                </div>
-                <div class="vertical-timeline-cards">
-                    ${cardsHtml}
-                </div>
-            </div>
-        `;
-    }
-
-    renderStoryCard(event, personId, index, total) {
-        const eventType = this.eventTypes[event.type] || this.eventTypes.custom;
-        const title = event.customTitle || eventType.label;
-        const dateStr = this.formatEventDate(event);
-        const eventColor = eventType.color || '#8d9199';
-
-        // Build photo thumbnails
-        let photosHtml = '';
-        if (event.documents && event.documents.length > 0) {
-            const imagesDocs = event.documents.filter(doc => this.isImageUrl(doc.url));
-            if (imagesDocs.length > 0) {
-                photosHtml = '<div class="story-card-photos">';
-                imagesDocs.slice(0, 4).forEach(doc => {
-                    photosHtml += `<img class="story-card-photo" src="${doc.url}" alt="${doc.label || 'Photo'}" onclick="event.stopPropagation(); app.openDocument('${encodeURIComponent(doc.url)}', '${encodeURIComponent(doc.label || 'Photo')}')" onerror="this.style.display='none'">`;
-                });
-                if (imagesDocs.length > 4) {
-                    photosHtml += `<span class="story-card-photos-more">+${imagesDocs.length - 4}</span>`;
-                }
-                photosHtml += '</div>';
-            }
-        }
-
-        // Audio player (rendered in Phase 3 — placeholder check)
-        let audioHtml = '';
-        if (event.audioUrl) {
-            const toldBy = event.audioToldBy ? `Told by ${event.audioToldBy}` : '';
-            const recordedBy = event.audioRecordedBy ? `Recorded by ${event.audioRecordedBy}` : '';
-            const credits = [toldBy, recordedBy].filter(Boolean).join(' \u00b7 ');
-
-            audioHtml = `
-                <div class="story-audio-section">
-                    ${event.storyPhotoUrl ? `
-                        <div class="story-audio-photo">
-                            <img src="${event.storyPhotoUrl}" alt="Story photo" onerror="this.parentElement.style.display='none'">
-                        </div>
-                    ` : ''}
-                    <div class="story-audio-player" data-audio-url="${event.audioUrl}">
-                        <button class="audio-play-btn" onclick="event.stopPropagation(); app.toggleAudio(this, '${event.audioUrl}')">
-                            <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
-                                <polygon points="5 3 19 12 5 21 5 3"/>
-                            </svg>
-                            <svg class="pause-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none">
-                                <rect x="6" y="4" width="4" height="16"/>
-                                <rect x="14" y="4" width="4" height="16"/>
-                            </svg>
-                        </button>
-                        <div class="audio-waveform">
-                            <div class="audio-progress"></div>
-                        </div>
-                        <span class="audio-time">0:00</span>
-                    </div>
-                    ${credits ? `<div class="story-audio-credits">${credits}</div>` : ''}
-                </div>
-            `;
-        }
-
-        return `
-            <div class="story-card" data-event-id="${event.id}" data-type="${event.type}">
-                <div class="story-card-marker">
-                    <div class="story-card-dot" style="background: ${eventColor}"></div>
-                </div>
-                <div class="story-card-content" onclick="app.openEventDetail('${personId}', '${event.id}')">
-                    <div class="story-card-accent" style="background: ${eventColor}"></div>
-                    <div class="story-card-header">
-                        <span class="story-card-type" style="background: ${eventColor}15; color: ${eventColor}">${eventType.label}</span>
-                        <span class="story-card-date">${dateStr}</span>
-                    </div>
-                    <h3 class="story-card-title">${title}</h3>
-                    ${event.location ? `
-                        <div class="story-card-location">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                                <circle cx="12" cy="10" r="3"/>
-                            </svg>
-                            ${event.location}
-                        </div>
-                    ` : ''}
-                    ${event.description ? `<p class="story-card-description">${this.truncateText(event.description, 200)}</p>` : ''}
-                    ${photosHtml}
-                    ${audioHtml}
-                    <div class="story-card-actions">
-                        <button class="story-card-action" onclick="event.stopPropagation(); app.openEventModal('${personId}', '${event.id}')" title="Edit">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                            </svg>
-                        </button>
-                        <button class="story-card-action story-card-action-delete" onclick="event.stopPropagation(); app.confirmDeleteEvent('${personId}', '${event.id}')" title="Delete">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    truncateText(text, maxLength) {
-        if (text.length <= maxLength) return text;
-        return text.substring(0, maxLength) + '...';
-    }
-
-    openEventDetail(personId, eventId) {
-        const person = this.getPerson(personId);
-        const event = person?.events.find(e => e.id === eventId);
-        if (!event) return;
-
-        const eventType = this.eventTypes[event.type] || this.eventTypes.custom;
-        const title = event.customTitle || eventType.label;
-        const dateStr = this.formatEventDate(event);
-
-        // Build linked person HTML
-        let linkedPersonHtml = '';
-        if (event.linkedPersonId) {
-            const linkedPerson = this.getPerson(event.linkedPersonId);
-            if (linkedPerson) {
-                const initials = this.getInitials(linkedPerson.name);
-                linkedPersonHtml = `
-                    <div class="event-detail-linked-person" onclick="app.closeEventDetailModal(); app.showTimeline('${linkedPerson.id}')">
-                        <div class="linked-person-avatar">${linkedPerson.photoUrl ? `<img src="${linkedPerson.photoUrl}" alt="">` : initials}</div>
-                        <div class="linked-person-info">
-                            <span class="linked-person-label">${event.type === 'marriage' ? 'Married to' : 'With'}</span>
-                            <span class="linked-person-name">${linkedPerson.name}</span>
-                        </div>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 18l6-6-6-6"/>
-                        </svg>
-                    </div>
-                `;
-            }
-        }
-
-        // Build media HTML
-        let mediaHtml = '';
-        if (event.documents && event.documents.length > 0) {
-            mediaHtml = '<div class="event-detail-media">';
-            event.documents.forEach(doc => {
-                const isImage = this.isImageUrl(doc.url);
-                if (isImage) {
-                    mediaHtml += `
-                        <div class="event-detail-media-item" onclick="app.openDocument('${encodeURIComponent(doc.url)}', '${encodeURIComponent(doc.label || 'Document')}')">
-                            <img src="${doc.url}" alt="${doc.label || 'Photo'}" onerror="this.parentElement.style.display='none'">
-                            ${doc.label ? `<span class="media-label">${doc.label}</span>` : ''}
-                        </div>
-                    `;
-                } else {
-                    mediaHtml += `
-                        <div class="event-detail-doc-item">
-                            <a href="${doc.url}" target="_blank">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                    <polyline points="14 2 14 8 20 8"/>
-                                </svg>
-                                ${doc.label || 'Document'}
-                            </a>
-                        </div>
-                    `;
-                }
-            });
-            mediaHtml += '</div>';
-        }
-
-        // Build source HTML
-        let sourceHtml = '';
-        if (event.source && event.source.title) {
-            sourceHtml = `
-                <div class="event-detail-source">
-                    <div class="source-header">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                            <line x1="16" y1="13" x2="8" y2="13"/>
-                            <line x1="16" y1="17" x2="8" y2="17"/>
-                        </svg>
-                        <span>Source</span>
-                    </div>
-                    <div class="source-content">
-                        <strong>${event.source.title}</strong>
-                        ${event.source.url ? `<br><a href="${event.source.url}" target="_blank">View Source</a>` : ''}
-                        ${event.source.dateAccessed ? `<br><small>Accessed: ${new Date(event.source.dateAccessed).toLocaleDateString()}</small>` : ''}
-                        ${event.source.notes ? `<p class="source-notes">${event.source.notes}</p>` : ''}
-                    </div>
-                </div>
-            `;
-        }
-
-        const modal = document.getElementById('eventDetailModal');
-        document.getElementById('eventDetailTitle').textContent = title;
-
-        document.getElementById('eventDetailContent').innerHTML = `
-            <div class="event-detail-header">
-                <span class="event-detail-type ${event.type}">${eventType.label}</span>
-                <span class="event-detail-date">${dateStr}</span>
-            </div>
-
-            ${linkedPersonHtml}
-
-            ${event.location ? `
-                <div class="event-detail-location">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                        <circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    <span>${event.location}</span>
-                </div>
-            ` : ''}
-
-            ${event.description ? `
-                <div class="event-detail-description">
-                    <p>${event.description}</p>
-                </div>
-            ` : ''}
-
-            ${mediaHtml}
-
-            ${sourceHtml}
-
-            <div class="event-detail-actions">
-                <button class="btn btn-secondary" onclick="app.closeEventDetailModal(); app.openEventModal('${personId}', '${eventId}')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                    Edit Event
-                </button>
-                <button class="btn btn-danger" onclick="app.closeEventDetailModal(); app.confirmDeleteEvent('${personId}', '${eventId}')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                    Delete
-                </button>
-            </div>
-        `;
-
-        modal.classList.add('active');
-    }
-
-    closeEventDetailModal() {
-        document.getElementById('eventDetailModal').classList.remove('active');
-    }
-
-    // ==================== Search ====================
-
-    search(query) {
-        if (!query.trim()) return [];
-
-        const lowerQuery = query.toLowerCase();
-        return this.people.filter(p =>
-            p.name.toLowerCase().includes(lowerQuery) ||
-            (p.birthPlace && p.birthPlace.toLowerCase().includes(lowerQuery))
-        );
-    }
-
-    renderSearchResults(results) {
-        const container = document.getElementById('searchResults');
-
-        if (results.length === 0) {
-            container.innerHTML = '<div class="search-no-results">No results found</div>';
-        } else {
-            container.innerHTML = results.map(person => {
-                const initials = this.getInitials(person.name);
-                const dates = this.formatLifeDates(person);
-                const photoHtml = person.photoUrl
-                    ? `<img src="${person.photoUrl}" alt="">`
-                    : initials;
-
-                return `
-                    <div class="search-result-item" onclick="app.selectSearchResult('${person.id}')">
-                        <div class="avatar">${photoHtml}</div>
-                        <div class="search-result-info">
-                            <div class="search-result-name">${person.name}</div>
-                            <div class="search-result-dates">${dates}</div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        container.classList.add('active');
-    }
-
-    selectSearchResult(personId) {
-        document.getElementById('searchResults').classList.remove('active');
-        document.getElementById('searchInput').value = '';
-        this.setFocusedPerson(personId);
-
-        // If in timeline view, switch to that person
-        if (!document.getElementById('timelineView').classList.contains('hidden')) {
-            this.showTimeline(personId);
-        }
-    }
-
-    setFocusedPerson(personId) {
-        this.focusedPersonId = personId;
-        this.render();
-    }
-
-    // ==================== Modals ====================
-
-    openPersonModal(personId = null, forGeneration = null) {
-        const modal = document.getElementById('personModal');
-        const form = document.getElementById('personForm');
-        const title = document.getElementById('modalTitle');
-
-        form.reset();
-        document.getElementById('personId').value = '';
-        document.getElementById('photoFile').value = '';
-        document.getElementById('personDocuments').innerHTML = '';
-        this.clearPhotoPreview();
-
-        // Populate parent/spouse dropdowns
-        this.populatePersonDropdowns(personId);
-
-        // Quick events group - only show for new people
-        const quickEventsGroup = document.getElementById('quickEventsGroup');
-
-        if (personId) {
-            const person = this.getPerson(personId);
-            if (person) {
-                title.textContent = 'Edit Person';
-                document.getElementById('personId').value = person.id;
-                document.getElementById('personName').value = person.name;
-                document.getElementById('birthDate').value = person.birthDate || '';
-                document.getElementById('deathDate').value = person.deathDate || '';
-                document.getElementById('birthPlace').value = person.birthPlace || '';
-                document.getElementById('photoUrl').value = person.photoUrl || '';
-                document.getElementById('biography').value = person.biography || '';
-                document.getElementById('fatherId').value = person.fatherId || '';
-                document.getElementById('motherId').value = person.motherId || '';
-
-                // Set photo preview if exists
-                if (person.photoUrl) {
-                    this.updatePhotoPreview(person.photoUrl);
-                }
-
-                // Set spouse selections
-                const spouseSelect = document.getElementById('spouseIds');
-                Array.from(spouseSelect.options).forEach(opt => {
-                    opt.selected = person.spouseIds.includes(opt.value);
-                });
-
-                // Populate documents
-                if (person.documents) {
-                    person.documents.forEach(doc => {
-                        this.addPersonDocumentChip(doc.url, doc.label);
-                    });
-                }
-
-                // Hide quick events for existing people
-                quickEventsGroup.style.display = 'none';
-            }
-        } else {
-            title.textContent = 'Add Person';
-            // Show quick events for new people
-            quickEventsGroup.style.display = 'block';
-            document.getElementById('createBirthEvent').checked = true;
-            document.getElementById('createDeathEvent').checked = false;
-        }
-
-        modal.classList.add('active');
-    }
-
-    addPersonDocumentChip(url, label) {
-        const container = document.getElementById('personDocuments');
-        const chip = document.createElement('div');
-        chip.className = 'document-chip';
-        chip.dataset.url = url;
-        chip.dataset.label = label;
-        chip.innerHTML = `
-            <span>${label || 'Document'}</span>
-            <button type="button" class="remove-doc" onclick="this.parentElement.remove()">×</button>
-        `;
-        container.appendChild(chip);
-    }
-
-    closePersonModal() {
-        document.getElementById('personModal').classList.remove('active');
-    }
-
-    populatePersonDropdowns(excludeId = null) {
-        const fatherSelect = document.getElementById('fatherId');
-        const motherSelect = document.getElementById('motherId');
-        const spouseSelect = document.getElementById('spouseIds');
-
-        const people = this.people.filter(p => p.id !== excludeId);
-
-        fatherSelect.innerHTML = '<option value="">-- Select Father --</option>' +
-            people.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-
-        motherSelect.innerHTML = '<option value="">-- Select Mother --</option>' +
-            people.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-
-        spouseSelect.innerHTML = people.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-    }
-
-    handlePersonFormSubmit(e) {
-        e.preventDefault();
-
-        const form = document.getElementById('personForm');
-        const id = document.getElementById('personId').value;
-        const spouseSelect = document.getElementById('spouseIds');
-        const selectedSpouses = Array.from(spouseSelect.selectedOptions).map(opt => opt.value);
-
-        // Gather person documents
-        const personDocuments = [];
-        document.querySelectorAll('#personDocuments .document-chip').forEach(chip => {
-            personDocuments.push({
-                url: chip.dataset.url,
-                label: chip.dataset.label
-            });
-        });
-
-        const personData = {
-            name: document.getElementById('personName').value.trim(),
-            birthDate: document.getElementById('birthDate').value || null,
-            deathDate: document.getElementById('deathDate').value || null,
-            birthPlace: document.getElementById('birthPlace').value.trim(),
-            photoUrl: document.getElementById('photoUrl').value.trim(),
-            biography: document.getElementById('biography').value.trim(),
-            fatherId: document.getElementById('fatherId').value || null,
-            motherId: document.getElementById('motherId').value || null,
-            spouseIds: selectedSpouses,
-            documents: personDocuments
-        };
-
-        // Track if this is a new person or if parents changed (for auto-creating birth events)
-        const existingPerson = id ? this.getPerson(id) : null;
-        const oldFatherId = existingPerson?.fatherId;
-        const oldMotherId = existingPerson?.motherId;
-
-        let newPersonId = id;
-
-        if (id) {
-            this.updatePerson(id, personData);
-        } else {
-            const newPerson = this.addPerson(personData);
-            newPersonId = newPerson.id;
-            if (!this.focusedPersonId) {
-                this.focusedPersonId = newPerson.id;
-            }
-        }
-
-        // Auto-create "child's birth" event on parent timelines
-        const person = this.getPerson(newPersonId);
-        if (person && person.birthDate) {
-            // Check father - create birth event if newly assigned
-            if (personData.fatherId && personData.fatherId !== oldFatherId) {
-                this.createChildBirthEvent(personData.fatherId, person);
-            }
-            // Check mother - create birth event if newly assigned
-            if (personData.motherId && personData.motherId !== oldMotherId) {
-                this.createChildBirthEvent(personData.motherId, person);
-            }
-        }
-
-        // Quick-add birth event if checkbox is checked (for new people)
-        // OR if editing and a birthDate was added where there wasn't one before
-        const oldBirthDate = existingPerson?.birthDate;
-        const birthEventExists = person.events.some(e => e.type === 'birth');
-
-        if (personData.birthDate && !birthEventExists) {
-            // For new people, check the checkbox; for existing people, auto-create if they just added a date
-            const shouldCreateBirth = !id
-                ? document.getElementById('createBirthEvent').checked
-                : (!oldBirthDate && personData.birthDate); // Added birth date to existing person
-
-            if (shouldCreateBirth) {
-                this.addEvent(newPersonId, {
-                    type: 'birth',
-                    date: personData.birthDate,
-                    location: personData.birthPlace || '',
-                    description: ''
-                });
-            }
-        }
-
-        // Quick-add death event if checkbox is checked (for new people)
-        // OR if editing and a deathDate was added where there wasn't one before
-        const oldDeathDate = existingPerson?.deathDate;
-        const deathEventExists = person.events.some(e => e.type === 'death');
-
-        if (personData.deathDate && !deathEventExists) {
-            const shouldCreateDeath = !id
-                ? document.getElementById('createDeathEvent').checked
-                : (!oldDeathDate && personData.deathDate); // Added death date to existing person
-
-            if (shouldCreateDeath) {
-                this.addEvent(newPersonId, {
-                    type: 'death',
-                    date: personData.deathDate,
-                    description: ''
-                });
-            }
-        }
-
-        // Update spouse references (bidirectional)
-        selectedSpouses.forEach(spouseId => {
-            const spouse = this.getPerson(spouseId);
-            if (spouse && !spouse.spouseIds.includes(newPersonId)) {
-                spouse.spouseIds.push(newPersonId);
-            }
-        });
-
-        // Handle adding as parent to another person
-        if (form.dataset.addAsParentTo && !id) {
-            const childId = form.dataset.addAsParentTo;
-            const parentType = form.dataset.parentType;
-            const child = this.getPerson(childId);
-            if (child) {
-                if (parentType === 'father') {
-                    child.fatherId = newPersonId;
-                } else if (parentType === 'mother') {
-                    child.motherId = newPersonId;
-                }
-            }
-            delete form.dataset.addAsParentTo;
-            delete form.dataset.parentType;
-        }
-
-        // Handle adding as spouse to another person
-        if (form.dataset.addAsSpouseTo && !id) {
-            const spouseOfId = form.dataset.addAsSpouseTo;
-            const spouseOf = this.getPerson(spouseOfId);
-            const newPerson = this.getPerson(newPersonId);
-            if (spouseOf && newPerson) {
-                if (!spouseOf.spouseIds.includes(newPersonId)) {
-                    spouseOf.spouseIds.push(newPersonId);
-                }
-                if (!newPerson.spouseIds.includes(spouseOfId)) {
-                    newPerson.spouseIds.push(spouseOfId);
-                }
-            }
-            delete form.dataset.addAsSpouseTo;
-        }
-
-        this.saveData();
-        this.closePersonModal();
-        this.render();
-
-        // Refresh timeline if open
-        if (this.currentPersonId) {
-            this.showTimeline(this.currentPersonId);
-        }
-    }
-
-    openEventModal(personId, eventId = null, presetType = null) {
-        const modal = document.getElementById('eventModal');
-        const form = document.getElementById('eventForm');
-        const title = document.getElementById('eventModalTitle');
-
-        form.reset();
-        document.getElementById('eventId').value = '';
-        document.getElementById('eventPersonId').value = personId;
-        document.getElementById('eventDocuments').innerHTML = '';
-        document.getElementById('customTitleGroup').style.display = 'none';
-        document.getElementById('linkedPersonGroup').style.display = 'none';
-        // Clear audio/story fields
-        document.getElementById('eventAudioUrl').value = '';
-        document.getElementById('audioUploadStatus').innerHTML = '';
-        document.getElementById('eventStoryPhotoUrl').value = '';
-        document.getElementById('storyPhotoPreview').innerHTML = '';
-
-        // Populate linked person dropdown (exclude current person)
-        const linkedPersonSelect = document.getElementById('eventLinkedPerson');
-        linkedPersonSelect.innerHTML = '<option value="">-- Select Person --</option>' +
-            this.people
-                .filter(p => p.id !== personId)
-                .map(p => `<option value="${p.id}">${p.name}</option>`)
-                .join('');
-
-        // Pre-set event type if provided
-        if (presetType) {
-            document.getElementById('eventType').value = presetType;
-            if (presetType === 'custom' || presetType === 'story') {
-                document.getElementById('customTitleGroup').style.display = 'block';
-            }
-            if (presetType === 'marriage' || presetType === 'divorce') {
-                document.getElementById('linkedPersonGroup').style.display = 'block';
-            }
-        }
-
-        if (eventId) {
-            const person = this.getPerson(personId);
-            const event = person?.events.find(e => e.id === eventId);
-            if (event) {
-                title.textContent = 'Edit Event';
-                document.getElementById('eventId').value = event.id;
-                document.getElementById('eventType').value = event.type;
-                document.getElementById('eventCustomTitle').value = event.customTitle || '';
-                document.getElementById('eventDate').value = event.date || '';
-                document.getElementById('eventEndDate').value = event.endDate || '';
-                document.getElementById('eventLocation').value = event.location || '';
-                document.getElementById('eventDescription').value = event.description || '';
-                document.getElementById('eventLinkedPerson').value = event.linkedPersonId || '';
-
-                // Source fields
-                document.getElementById('eventSourceTitle').value = event.source?.title || '';
-                document.getElementById('eventSourceUrl').value = event.source?.url || '';
-                document.getElementById('eventSourceDate').value = event.source?.dateAccessed || '';
-                document.getElementById('eventSourceNotes').value = event.source?.notes || '';
-
-                if (event.type === 'custom' || event.type === 'story') {
-                    document.getElementById('customTitleGroup').style.display = 'block';
-                }
-                if (event.type === 'marriage' || event.type === 'divorce') {
-                    document.getElementById('linkedPersonGroup').style.display = 'block';
-                }
-
-                // Populate documents
-                if (event.documents) {
-                    event.documents.forEach(doc => {
-                        this.addDocumentChip(doc.url, doc.label);
-                    });
-                }
-
-                // Audio/story fields
-                document.getElementById('eventAudioUrl').value = event.audioUrl || '';
-                document.getElementById('eventAudioToldBy').value = event.audioToldBy || '';
-                document.getElementById('eventAudioRecordedBy').value = event.audioRecordedBy || '';
-                document.getElementById('eventStoryPhotoUrl').value = event.storyPhotoUrl || '';
-                if (event.audioUrl) {
-                    document.getElementById('audioUploadStatus').innerHTML =
-                        `<span class="upload-complete">Audio uploaded</span>
-                         <button type="button" class="btn-remove-upload" onclick="app.removeAudioUpload()">&times;</button>`;
-                }
-                if (event.storyPhotoUrl) {
-                    document.getElementById('storyPhotoPreview').innerHTML =
-                        `<img src="${event.storyPhotoUrl}" alt="Story photo preview">
-                         <button type="button" class="btn-remove-upload" onclick="app.removeStoryPhotoUpload()">&times;</button>`;
-                }
-            }
-        } else {
-            title.textContent = 'Add Life Event';
-        }
-
-        modal.classList.add('active');
-    }
-
-    closeEventModal() {
-        document.getElementById('eventModal').classList.remove('active');
-    }
-
-    handleEventFormSubmit(e) {
-        e.preventDefault();
-
-        const eventId = document.getElementById('eventId').value;
-        const personId = document.getElementById('eventPersonId').value;
-
-        // Gather documents
-        const documents = [];
-        document.querySelectorAll('#eventDocuments .document-chip').forEach(chip => {
-            documents.push({
-                url: chip.dataset.url,
-                label: chip.dataset.label
-            });
-        });
-
-        // Gather source info
-        const sourceTitle = document.getElementById('eventSourceTitle').value.trim();
-        const source = sourceTitle ? {
-            title: sourceTitle,
-            url: document.getElementById('eventSourceUrl').value.trim() || null,
-            dateAccessed: document.getElementById('eventSourceDate').value || null,
-            notes: document.getElementById('eventSourceNotes').value.trim() || null
-        } : null;
-
-        const eventData = {
-            type: document.getElementById('eventType').value,
-            customTitle: document.getElementById('eventCustomTitle').value.trim() || null,
-            date: document.getElementById('eventDate').value || null,
-            endDate: document.getElementById('eventEndDate').value || null,
-            location: document.getElementById('eventLocation').value.trim(),
-            description: document.getElementById('eventDescription').value.trim(),
-            linkedPersonId: document.getElementById('eventLinkedPerson').value || null,
-            documents: documents,
-            source: source,
-            audioUrl: document.getElementById('eventAudioUrl').value.trim() || null,
-            audioToldBy: document.getElementById('eventAudioToldBy').value.trim() || null,
-            audioRecordedBy: document.getElementById('eventAudioRecordedBy').value.trim() || null,
-            storyPhotoUrl: document.getElementById('eventStoryPhotoUrl').value.trim() || null
-        };
-
-        if (eventId) {
-            this.updateEvent(personId, eventId, eventData);
-        } else {
-            this.addEvent(personId, eventData);
-        }
-
-        this.closeEventModal();
-        this.showTimeline(personId);
-    }
-
-    addDocumentChip(url, label) {
-        const container = document.getElementById('eventDocuments');
-        const chip = document.createElement('div');
-        chip.className = 'document-chip';
-        chip.dataset.url = url;
-        chip.dataset.label = label;
-        chip.innerHTML = `
-            <span>${label || 'Document'}</span>
-            <button type="button" class="remove-doc" onclick="this.parentElement.remove()">×</button>
-        `;
-        container.appendChild(chip);
-    }
-
-    confirmDeleteEvent(personId, eventId) {
-        if (confirm('Are you sure you want to delete this event?')) {
-            this.deleteEvent(personId, eventId);
-            this.showTimeline(personId);
-        }
-    }
-
-    openDocument(encodedUrl, encodedLabel) {
-        const url = decodeURIComponent(encodedUrl);
-        const label = decodeURIComponent(encodedLabel);
-
-        const modal = document.getElementById('documentModal');
-        const title = document.getElementById('documentTitle');
-        const viewer = document.getElementById('documentViewer');
-
-        title.textContent = label;
-
-        const isImage = this.isImageUrl(url);
-        if (isImage) {
-            viewer.innerHTML = `<img src="${url}" alt="${label}" onerror="this.outerHTML='<div class=\\'error\\'>Failed to load image. <a href=\\'${url}\\' target=\\'_blank\\'>Open in new tab</a></div>'">`;
-        } else {
-            viewer.innerHTML = `<iframe src="${url}" title="${label}"></iframe>`;
-        }
-
-        modal.classList.add('active');
-    }
-
-    closeDocumentModal() {
-        document.getElementById('documentModal').classList.remove('active');
-    }
-
-    openSettingsModal() {
-        // Set dark mode toggle to current state
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        document.getElementById('darkModeToggle').checked = currentTheme === 'dark';
-        document.getElementById('settingsModal').classList.add('active');
-    }
-
-    closeSettingsModal() {
-        document.getElementById('settingsModal').classList.remove('active');
-    }
-
-    // ==================== Photo Upload ====================
-
-    handlePhotoUpload(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
-            alert('Please select an image file.');
-            return;
-        }
-
-        // Convert to base64 for local storage
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const dataUrl = event.target.result;
-            this.updatePhotoPreview(dataUrl);
-            document.getElementById('photoUrl').value = dataUrl;
-        };
-        reader.readAsDataURL(file);
-    }
-
-    handlePhotoUrlChange(e) {
-        const url = e.target.value.trim();
-        if (url) {
-            this.updatePhotoPreview(url);
-        } else {
-            this.clearPhotoPreview();
-        }
-    }
-
-    updatePhotoPreview(url) {
-        const preview = document.getElementById('photoPreview');
-        preview.innerHTML = `<img src="${url}" alt="Preview" onerror="this.parentElement.innerHTML='<svg viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'1.5\\'><rect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\' ry=\\'2\\'/><circle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/><polyline points=\\'21 15 16 10 5 21\\'/></svg>'">`;
-        preview.classList.add('has-photo');
-    }
-
-    clearPhotoPreview() {
-        const preview = document.getElementById('photoPreview');
-        preview.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-            </svg>
-        `;
-        preview.classList.remove('has-photo');
-    }
-
-    // ==================== Audio/Story Upload ====================
-
-    async uploadFileToStorage(file, path) {
-        const storage = window.firebaseStorage;
-        const storageRefFn = window.firebaseStorageRef;
-        const uploadBytes = window.firebaseUploadBytes;
-        const getDownloadURL = window.firebaseGetDownloadURL;
-
-        const fileRef = storageRefFn(storage, path);
-        const snapshot = await uploadBytes(fileRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-        return downloadURL;
-    }
-
-    async handleAudioUpload(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        // Validate: mp3 or m4a, max 50MB
-        if (!file.name.match(/\.(mp3|m4a)$/i)) {
-            alert('Please select an MP3 or M4A audio file.');
-            e.target.value = '';
-            return;
-        }
-        if (file.size > 50 * 1024 * 1024) {
-            alert('Audio file must be under 50MB.');
-            e.target.value = '';
-            return;
-        }
-
-        const statusEl = document.getElementById('audioUploadStatus');
-        statusEl.innerHTML = '<span class="upload-progress">Uploading...</span>';
-
-        try {
-            const personId = document.getElementById('eventPersonId').value;
-            const path = `audio/${personId}/${Date.now()}_${file.name}`;
-            const url = await this.uploadFileToStorage(file, path);
-            document.getElementById('eventAudioUrl').value = url;
-            statusEl.innerHTML = `<span class="upload-complete">${file.name}</span>
-                <button type="button" class="btn-remove-upload" onclick="app.removeAudioUpload()">&times;</button>`;
-        } catch (err) {
-            console.error('Audio upload error:', err);
-            statusEl.innerHTML = '<span class="upload-error">Upload failed. Try again.</span>';
-        }
-    }
-
-    async handleStoryPhotoUpload(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        if (!file.type.startsWith('image/')) {
-            alert('Please select an image file.');
-            e.target.value = '';
-            return;
-        }
-
-        const previewEl = document.getElementById('storyPhotoPreview');
-        previewEl.innerHTML = '<span class="upload-progress">Uploading...</span>';
-
-        try {
-            const personId = document.getElementById('eventPersonId').value;
-            const path = `story-photos/${personId}/${Date.now()}_${file.name}`;
-            const url = await this.uploadFileToStorage(file, path);
-            document.getElementById('eventStoryPhotoUrl').value = url;
-            previewEl.innerHTML = `<img src="${url}" alt="Story photo preview">
-                <button type="button" class="btn-remove-upload" onclick="app.removeStoryPhotoUpload()">&times;</button>`;
-        } catch (err) {
-            console.error('Story photo upload error:', err);
-            previewEl.innerHTML = '<span class="upload-error">Upload failed. Try again.</span>';
-        }
-    }
-
-    removeAudioUpload() {
-        document.getElementById('eventAudioUrl').value = '';
-        document.getElementById('eventAudioFile').value = '';
-        document.getElementById('audioUploadStatus').innerHTML = '';
-    }
-
-    removeStoryPhotoUpload() {
-        document.getElementById('eventStoryPhotoUrl').value = '';
-        document.getElementById('eventStoryPhotoFile').value = '';
-        document.getElementById('storyPhotoPreview').innerHTML = '';
-    }
-
-    toggleAudio(btn, audioUrl) {
-        // If already playing this URL, pause it
-        if (this.currentAudio && this.currentAudio._audioUrl === audioUrl && !this.currentAudio.paused) {
-            this.currentAudio.pause();
-            btn.querySelector('.play-icon').style.display = '';
-            btn.querySelector('.pause-icon').style.display = 'none';
-            return;
-        }
-
-        // Stop any currently playing audio
-        if (this.currentAudio) {
-            this.currentAudio.pause();
-            document.querySelectorAll('.audio-play-btn').forEach(b => {
-                b.querySelector('.play-icon').style.display = '';
-                b.querySelector('.pause-icon').style.display = 'none';
-            });
-        }
-
-        // Create new audio element
-        this.currentAudio = new Audio(audioUrl);
-        this.currentAudio._audioUrl = audioUrl;
-        this.currentAudio.play();
-        btn.querySelector('.play-icon').style.display = 'none';
-        btn.querySelector('.pause-icon').style.display = '';
-
-        const playerEl = btn.closest('.story-audio-player');
-        const progressEl = playerEl.querySelector('.audio-progress');
-        const timeEl = playerEl.querySelector('.audio-time');
-
-        this.currentAudio.addEventListener('timeupdate', () => {
-            if (this.currentAudio.duration) {
-                const pct = (this.currentAudio.currentTime / this.currentAudio.duration) * 100;
-                progressEl.style.width = pct + '%';
-                timeEl.textContent = this.formatAudioTime(this.currentAudio.currentTime);
-            }
-        });
-
-        this.currentAudio.addEventListener('ended', () => {
-            btn.querySelector('.play-icon').style.display = '';
-            btn.querySelector('.pause-icon').style.display = 'none';
-            progressEl.style.width = '0%';
-            timeEl.textContent = '0:00';
-        });
-    }
-
-    formatAudioTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    // ==================== Utilities ====================
-
-    formatLifeDates(person) {
-        const birth = person.birthDate ? new Date(person.birthDate).getFullYear() : '?';
-        const death = person.deathDate ? new Date(person.deathDate).getFullYear() : (person.birthDate ? 'Present' : '');
-        return death ? `${birth} – ${death}` : `b. ${birth}`;
-    }
-
-    formatEventDate(event) {
-        if (!event.date) return '';
-
-        const date = new Date(event.date);
-        const options = { year: 'numeric', month: 'short', day: 'numeric' };
-        let str = date.toLocaleDateString('en-US', options);
-
-        if (event.endDate) {
-            const endDate = new Date(event.endDate);
-            str += ` – ${endDate.toLocaleDateString('en-US', options)}`;
-        }
-
-        return str;
     }
 
     getInitials(name) {
-        return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        if (!name) return '?';
+        return name.split(' ')
+            .filter(w => w.length > 0)
+            .map(w => w[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2);
     }
 
-    isImageUrl(url) {
-        const ext = url.split('.').pop().toLowerCase().split('?')[0];
-        return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
+    formatDateRange(birth, death) {
+        if (!birth && !death) return '';
+        if (birth && death) return `${birth} \u2013 ${death}`;
+        if (birth) return `b. ${birth}`;
+        return `d. ${death}`;
     }
 
-    // ==================== Event Binding ====================
+    // ─── ROUTING ───────────────────────────────
 
-    bindEvents() {
-        // Search
-        const searchInput = document.getElementById('searchInput');
-        const searchResults = document.getElementById('searchResults');
+    navigate() {
+        const hash = window.location.hash || '#/';
+        const main = document.getElementById('mainContent');
 
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value;
-            if (query.length >= 2) {
-                const results = this.search(query);
-                this.renderSearchResults(results);
+        // Scroll to top on navigation
+        window.scrollTo(0, 0);
+
+        // Stop any playing audio
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+        }
+
+        // Update active nav link
+        document.querySelectorAll('.nav-link').forEach(link => {
+            const href = link.getAttribute('href');
+            if (hash === '#/' || hash === '') {
+                link.classList.remove('active');
+            } else if (hash.startsWith(href) && href !== '#/') {
+                link.classList.add('active');
             } else {
-                searchResults.classList.remove('active');
+                link.classList.remove('active');
             }
         });
 
-        searchInput.addEventListener('focus', (e) => {
-            if (e.target.value.length >= 2) {
-                const results = this.search(e.target.value);
-                this.renderSearchResults(results);
+        // Route to the correct view
+        if (hash === '#/' || hash === '' || hash === '#') {
+            this.renderHome(main);
+        } else if (hash === '#/stories') {
+            this.renderStories(main);
+        } else if (hash.startsWith('#/person/')) {
+            const id = decodeURIComponent(hash.replace('#/person/', ''));
+            this.renderPerson(main, id);
+        } else if (hash === '#/family') {
+            this.renderFamily(main);
+        } else {
+            this.renderHome(main);
+        }
+    }
+
+    // ============================================
+    //   HOME PAGE
+    // ============================================
+
+    renderHome(container) {
+        this.currentView = 'home';
+
+        const featuredStory = this.stories[0];
+        const displayPeople = this.people.slice(0, 8);
+
+        let html = `
+            <section class="home-hero">
+                <div class="home-hero-content">
+                    <h1>Our Family Story</h1>
+                    <div class="home-hero-actions">
+                        <a href="#/stories" class="btn btn-primary">Read Our Stories</a>
+                        <a href="#/family" class="btn btn-secondary">Meet the Family</a>
+                    </div>
+                </div>
+                <div class="scroll-hint">
+                    <span>Explore</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14M5 12l7 7 7-7"/>
+                    </svg>
+                </div>
+            </section>
+        `;
+
+        // Featured Story section
+        if (featuredStory) {
+            const excerpt = this.truncate(featuredStory.narrative || '', 220);
+            html += `
+                <section class="home-section">
+                    <div class="home-section-header">
+                        <h2>Featured Story</h2>
+                        <a href="#/stories">View all stories &rarr;</a>
+                    </div>
+                    <div class="featured-story fade-in">
+                        <div class="featured-story-image">
+                            ${featuredStory.coverPhotoUrl
+                                ? `<img src="${featuredStory.coverPhotoUrl}" alt="${this.esc(featuredStory.title)}">`
+                                : ''
+                            }
+                        </div>
+                        <div class="featured-story-content">
+                            <div class="featured-story-label">Featured</div>
+                            <h3>${this.esc(featuredStory.title)}</h3>
+                            ${featuredStory.date ? `<div class="featured-story-date">${this.esc(featuredStory.date)}</div>` : ''}
+                            <p class="featured-story-excerpt">${excerpt}</p>
+                            <a href="#/stories" class="btn btn-secondary btn-small">Read the story &rarr;</a>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        // Meet the Family section
+        if (displayPeople.length > 0) {
+            html += `
+                <section class="home-section">
+                    <div class="home-section-header">
+                        <h2>The Family</h2>
+                        <a href="#/family">View all &rarr;</a>
+                    </div>
+                    <div class="people-grid">
+                        ${displayPeople.map(p => this.renderPersonThumb(p)).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        // Empty state when no content exists yet
+        if (this.stories.length === 0 && this.people.length === 0) {
+            html += `
+                <section class="home-section">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#10022;</div>
+                        <h3>Your family story starts here</h3>
+                        <p>Add your first family members and stories to begin building your family memoir.</p>
+                        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="app.openPersonModal()">Add a Person</button>
+                            <button class="btn btn-secondary" onclick="app.openStoryModal()">Add a Story</button>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        container.innerHTML = html;
+        this.observeElements();
+    }
+
+    renderPersonThumb(person) {
+        const initials = this.getInitials(person.name);
+        const dates = this.formatDateRange(person.birthDate, person.deathDate);
+
+        return `
+            <div class="person-thumb fade-in" onclick="window.location.hash='#/person/${encodeURIComponent(person.id)}'">
+                <div class="person-thumb-avatar">
+                    ${person.photoUrl
+                        ? `<img src="${person.photoUrl}" alt="${this.esc(person.name)}">`
+                        : initials
+                    }
+                </div>
+                <div class="person-thumb-name">${this.esc(person.name)}</div>
+                ${dates ? `<div class="person-thumb-dates">${this.esc(dates)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    // ============================================
+    //   STORIES PAGE
+    // ============================================
+
+    renderStories(container) {
+        this.currentView = 'stories';
+
+        let html = `
+            <div class="stories-page">
+                <div class="stories-header">
+                    <h1>Our Stories</h1>
+                    <p>The moments and memories that shaped our family</p>
+                </div>
+                <div class="stories-actions">
+                    <button class="btn btn-accent btn-small" onclick="app.openStoryModal()">+ Add Story</button>
+                </div>
+        `;
+
+        if (this.stories.length === 0) {
+            html += `
+                <div class="empty-state">
+                    <div class="empty-state-icon">&#128214;</div>
+                    <h3>No stories yet</h3>
+                    <p>Every family has stories worth telling. Add your first one &mdash; it could be a cherished memory, an immigration tale, or just a funny moment at the dinner table.</p>
+                    <button class="btn btn-primary" onclick="app.openStoryModal()">Tell a Story</button>
+                </div>
+            `;
+        } else {
+            html += this.stories.map(s => this.renderStoryCard(s)).join('');
+        }
+
+        html += `</div>`;
+        container.innerHTML = html;
+        this.observeElements();
+    }
+
+    renderStoryCard(story) {
+        const taggedPeople = (story.peopleIds || [])
+            .map(id => this.getPerson(id))
+            .filter(Boolean);
+
+        const metaParts = [];
+        if (story.date) metaParts.push(`<span>${this.esc(story.date)}</span>`);
+        if (story.location) metaParts.push(`<span>${this.esc(story.location)}</span>`);
+
+        const narrativeHtml = (story.narrative || '')
+            .split('\n')
+            .filter(p => p.trim())
+            .map(p => `<p>${this.esc(p)}</p>`)
+            .join('');
+
+        return `
+            <article class="story-card">
+                ${story.coverPhotoUrl
+                    ? `<div class="story-card-image"><img src="${story.coverPhotoUrl}" alt="${this.esc(story.title)}"></div>`
+                    : `<div class="story-card-image no-image"></div>`
+                }
+                <div class="story-card-body">
+                    ${metaParts.length ? `<div class="story-card-meta">${metaParts.join('')}</div>` : ''}
+                    <h2>${this.esc(story.title)}</h2>
+                    <div class="story-card-narrative">${narrativeHtml}</div>
+                    ${story.audioUrl ? this.renderAudioPlayer(story) : ''}
+                    ${taggedPeople.length > 0 ? `
+                        <div class="story-people">
+                            <span class="story-people-label">People in this story:</span>
+                            ${taggedPeople.map(p => this.renderPersonTag(p)).join('')}
+                        </div>
+                    ` : ''}
+                    <div class="story-card-actions">
+                        <button class="story-action-btn" onclick="app.openStoryModal('${story.id}')">Edit</button>
+                        <button class="story-action-btn" onclick="app.deleteStory('${story.id}')">Delete</button>
+                    </div>
+                </div>
+            </article>
+        `;
+    }
+
+    renderPersonTag(person) {
+        const initials = this.getInitials(person.name);
+        return `
+            <a href="#/person/${encodeURIComponent(person.id)}" class="person-tag">
+                <span class="person-tag-avatar">
+                    ${person.photoUrl
+                        ? `<img src="${person.photoUrl}" alt="">`
+                        : initials
+                    }
+                </span>
+                ${this.esc(person.name)}
+            </a>
+        `;
+    }
+
+    // ─── AUDIO PLAYER ──────────────────────────
+
+    renderAudioPlayer(story) {
+        const aid = `audio-${story.id}`;
+        return `
+            <div class="story-audio">
+                <button class="audio-play-btn" onclick="app.toggleAudio('${aid}')">
+                    <svg id="${aid}-icon" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+                </button>
+                <div class="audio-info">
+                    <div class="audio-label">Listen to this story</div>
+                    ${(story.audioToldBy || story.audioRecordedBy) ? `
+                        <div class="audio-credits">
+                            ${story.audioToldBy ? `Told by ${this.esc(story.audioToldBy)}` : ''}
+                            ${story.audioToldBy && story.audioRecordedBy ? ' &middot; ' : ''}
+                            ${story.audioRecordedBy ? `Recorded by ${this.esc(story.audioRecordedBy)}` : ''}
+                        </div>
+                    ` : ''}
+                    <div class="audio-progress">
+                        <div class="audio-progress-bar" id="${aid}-progress"></div>
+                    </div>
+                </div>
+                <span class="audio-time" id="${aid}-time">0:00</span>
+                <audio id="${aid}" src="${story.audioUrl}" preload="none"></audio>
+            </div>
+        `;
+    }
+
+    toggleAudio(audioId) {
+        const audio = document.getElementById(audioId);
+        const icon = document.getElementById(`${audioId}-icon`);
+        const progress = document.getElementById(`${audioId}-progress`);
+        const timeEl = document.getElementById(`${audioId}-time`);
+        if (!audio) return;
+
+        // Stop any other currently playing audio
+        if (this.currentAudio && this.currentAudio !== audio) {
+            this.currentAudio.pause();
+            this.currentAudio.currentTime = 0;
+            const prevId = this.currentAudio.id;
+            const prevIcon = document.getElementById(`${prevId}-icon`);
+            const prevProgress = document.getElementById(`${prevId}-progress`);
+            const prevTime = document.getElementById(`${prevId}-time`);
+            if (prevIcon) prevIcon.innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+            if (prevProgress) prevProgress.style.width = '0%';
+            if (prevTime) prevTime.textContent = '0:00';
+        }
+
+        if (audio.paused) {
+            audio.play();
+            icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+            this.currentAudio = audio;
+
+            audio.ontimeupdate = () => {
+                if (audio.duration) {
+                    const pct = (audio.currentTime / audio.duration) * 100;
+                    if (progress) progress.style.width = pct + '%';
+                    if (timeEl) timeEl.textContent = this.formatTime(audio.currentTime);
+                }
+            };
+
+            audio.onended = () => {
+                icon.innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+                if (progress) progress.style.width = '0%';
+                if (timeEl) timeEl.textContent = '0:00';
+                this.currentAudio = null;
+            };
+        } else {
+            audio.pause();
+            icon.innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+            this.currentAudio = null;
+        }
+    }
+
+    formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    // ============================================
+    //   PERSON PAGE
+    // ============================================
+
+    renderPerson(container, personId) {
+        this.currentView = 'person';
+        const person = this.getPerson(personId);
+
+        if (!person) {
+            container.innerHTML = `
+                <div class="person-page">
+                    <div class="empty-state" style="padding-top:140px;">
+                        <div class="empty-state-icon">&#128269;</div>
+                        <h3>Person not found</h3>
+                        <p>We couldn't find this person in the family.</p>
+                        <a href="#/" class="btn btn-secondary">Go Home</a>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        const initials = this.getInitials(person.name);
+        const dates = this.formatDateRange(person.birthDate, person.deathDate);
+        const stories = this.getStoriesForPerson(personId);
+        const children = this.getChildren(personId);
+        const siblings = this.getSiblings(personId);
+        const father = person.fatherId ? this.getPerson(person.fatherId) : null;
+        const mother = person.motherId ? this.getPerson(person.motherId) : null;
+        const spouses = (person.spouseIds || []).map(id => this.getPerson(id)).filter(Boolean);
+
+        const timelineEvents = this.getTimelineEvents(person);
+        const photos = person.photos || [];
+        const hasRichContent = person.biography || stories.length > 0 || person.photoUrl || timelineEvents.length > 0 || photos.length > 0;
+        const connectionsHtml = this.buildConnectionsText(person, father, mother, spouses, children, siblings);
+
+        let html = `
+            <div class="person-page">
+                <section class="person-hero">
+                    <div class="person-hero-bg ${person.photoUrl ? '' : 'no-photo'}">
+                        ${person.photoUrl ? `<img src="${person.photoUrl}" alt="">` : ''}
+                    </div>
+                    <div class="person-hero-content">
+                        <div class="person-avatar-large">
+                            ${person.photoUrl
+                                ? `<img src="${person.photoUrl}" alt="${this.esc(person.name)}">`
+                                : initials
+                            }
+                        </div>
+                        <h1>${this.esc(person.name)}</h1>
+                        ${dates ? `<div class="person-dates">${this.esc(dates)}</div>` : ''}
+                        ${person.birthPlace ? `<div class="person-birthplace">${this.esc(person.birthPlace)}</div>` : ''}
+                    </div>
+                </section>
+
+                <div class="person-body">
+        `;
+
+        // Biography
+        if (person.biography) {
+            const bioParagraphs = person.biography
+                .split('\n').filter(p => p.trim())
+                .map(p => `<p>${this.esc(p)}</p>`).join('');
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">About</div>
+                    <div class="person-biography">${bioParagraphs}</div>
+                </section>
+            `;
+        }
+
+        // Life events timeline
+        if (timelineEvents.length > 0) {
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">Life Events</div>
+                    <div class="person-timeline">
+                        ${timelineEvents.map(e => this.renderTimelineEvent(e)).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        // Photo gallery
+        if (photos.length > 0) {
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">Photos</div>
+                    <div class="person-photos-grid">
+                        ${photos.map(p => `
+                            <div class="person-photo-item">
+                                <img src="${p.url}" alt="${this.esc(p.caption || '')}">
+                                ${p.caption ? `<div class="person-photo-caption">${this.esc(p.caption)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        // Family connections as natural readable text
+        if (connectionsHtml) {
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">Family</div>
+                    <div class="family-connections">${connectionsHtml}</div>
+                </section>
+            `;
+        }
+
+        // Stories featuring this person
+        if (stories.length > 0) {
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">Their Stories</div>
+                    <div class="person-stories-list">
+                        ${stories.map(s => this.renderStoryCard(s)).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        // Warm "beginning" treatment for minimal-content pages
+        if (!hasRichContent && !connectionsHtml) {
+            const firstName = this.esc((person.name || '').split(' ')[0] || 'This person');
+            html += `
+                <div class="person-beginning fade-in">
+                    <div class="person-beginning-ornament">&#10022;</div>
+                    <p class="person-beginning-text">
+                        ${firstName}'s story is just beginning.<br>
+                        Every detail you add helps keep their memory alive.
+                    </p>
+                    <button class="btn btn-secondary btn-small" onclick="app.openPersonModal('${person.id}')">
+                        Add to their story
+                    </button>
+                </div>
+            `;
+        }
+
+        // Edit button
+        html += `
+                    <div class="person-actions fade-in">
+                        <button class="btn btn-secondary btn-small" onclick="app.openPersonModal('${person.id}')">Edit</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        container.innerHTML = html;
+        this.observeElements();
+    }
+
+    buildConnectionsText(person, father, mother, spouses, children, siblings) {
+        const parts = [];
+
+        // Parents
+        if (father || mother) {
+            let text = 'Child of ';
+            if (father && mother) {
+                text += `<a href="#/person/${encodeURIComponent(father.id)}">${this.esc(father.name)}</a>`;
+                text += ` and <a href="#/person/${encodeURIComponent(mother.id)}">${this.esc(mother.name)}</a>.`;
+            } else if (father) {
+                text += `<a href="#/person/${encodeURIComponent(father.id)}">${this.esc(father.name)}</a>.`;
+            } else {
+                text += `<a href="#/person/${encodeURIComponent(mother.id)}">${this.esc(mother.name)}</a>.`;
             }
-        });
+            parts.push(`<p>${text}</p>`);
+        }
 
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.search-container')) {
-                searchResults.classList.remove('active');
-            }
-        });
-
-        // Header buttons
-        document.getElementById('addPersonBtn').addEventListener('click', () => this.openPersonModal());
-        document.getElementById('settingsBtn').addEventListener('click', () => this.openSettingsModal());
-
-        // View toggle
-        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const view = e.currentTarget.dataset.view;
-                this.setView(view);
-            });
-        });
-
-        // Back to tree
-        document.getElementById('backToTree').addEventListener('click', () => this.hideTimeline());
-
-        // Focus mode toggle
-        document.getElementById('focusModeBtn').addEventListener('click', () => {
-            this.setFocusMode(true);
-        });
-
-        document.getElementById('showAllBtn').addEventListener('click', () => {
-            this.setFocusMode(false);
-        });
-
-        // Person modal
-        document.getElementById('closeModal').addEventListener('click', () => this.closePersonModal());
-        document.getElementById('cancelBtn').addEventListener('click', () => this.closePersonModal());
-        document.getElementById('personForm').addEventListener('submit', (e) => this.handlePersonFormSubmit(e));
-
-        // Photo upload handling
-        document.getElementById('photoFile').addEventListener('change', (e) => this.handlePhotoUpload(e));
-        document.getElementById('photoUrl').addEventListener('input', (e) => this.handlePhotoUrlChange(e));
-
-        // Audio/story upload handling
-        document.getElementById('eventAudioFile').addEventListener('change', (e) => this.handleAudioUpload(e));
-        document.getElementById('eventStoryPhotoFile').addEventListener('change', (e) => this.handleStoryPhotoUpload(e));
-
-        // Event modal
-        document.getElementById('closeEventModal').addEventListener('click', () => this.closeEventModal());
-        document.getElementById('cancelEventBtn').addEventListener('click', () => this.closeEventModal());
-        document.getElementById('eventForm').addEventListener('submit', (e) => this.handleEventFormSubmit(e));
-
-        document.getElementById('eventType').addEventListener('change', (e) => {
-            const type = e.target.value;
-            const showCustomTitle = type === 'custom' || type === 'story';
-            document.getElementById('customTitleGroup').style.display = showCustomTitle ? 'block' : 'none';
-
-            // Show linked person for marriage/divorce events
-            const showLinkedPerson = type === 'marriage' || type === 'divorce';
-            document.getElementById('linkedPersonGroup').style.display = showLinkedPerson ? 'block' : 'none';
-            if (showLinkedPerson) {
-                const hint = document.getElementById('linkedPersonHint');
-                hint.textContent = type === 'marriage' ? 'Select the spouse for this marriage' : 'Select the former spouse';
-            }
-        });
-
-        document.getElementById('addDocBtn').addEventListener('click', () => {
-            const urlInput = document.getElementById('docUrl');
-            const labelInput = document.getElementById('docLabel');
-            if (urlInput.value.trim()) {
-                this.addDocumentChip(urlInput.value.trim(), labelInput.value.trim() || 'Document');
-                urlInput.value = '';
-                labelInput.value = '';
-            }
-        });
-
-        // Person documents
-        document.getElementById('addPersonDocBtn').addEventListener('click', () => {
-            const urlInput = document.getElementById('personDocUrl');
-            const labelInput = document.getElementById('personDocLabel');
-            if (urlInput.value.trim()) {
-                this.addPersonDocumentChip(urlInput.value.trim(), labelInput.value.trim() || 'Document');
-                urlInput.value = '';
-                labelInput.value = '';
-            }
-        });
-
-        // Event detail modal
-        document.getElementById('closeEventDetailModal').addEventListener('click', () => this.closeEventDetailModal());
-
-        // Document modal
-        document.getElementById('closeDocumentModal').addEventListener('click', () => this.closeDocumentModal());
-
-        // Settings modal
-        document.getElementById('closeSettingsModal').addEventListener('click', () => this.closeSettingsModal());
-        document.getElementById('exportDataBtn').addEventListener('click', () => this.exportData());
-        document.getElementById('importDataInput').addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                this.importData(e.target.files[0]);
-                e.target.value = '';
-            }
-        });
-        const gedcomInput = document.getElementById('gedcomImportInput');
-        if (gedcomInput) {
-            gedcomInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    this.importGedcom(e.target.files[0]);
-                    e.target.value = '';
+        // Spouses (with divorce awareness)
+        if (spouses.length > 0) {
+            spouses.forEach(s => {
+                const link = `<a href="#/person/${encodeURIComponent(s.id)}">${this.esc(s.name)}</a>`;
+                const status = this.getMarriageStatus(person.id, s.id);
+                if (status === 'divorced') {
+                    parts.push(`<p>Formerly married to ${link}.</p>`);
+                } else {
+                    parts.push(`<p>Married ${link}.</p>`);
                 }
             });
         }
-        document.getElementById('clearDataBtn').addEventListener('click', () => this.clearAllData());
 
-        // Dark mode toggle
-        document.getElementById('darkModeToggle').addEventListener('change', () => this.toggleDarkMode());
+        // Children
+        if (children.length > 0) {
+            const links = children.map(c =>
+                `<a href="#/person/${encodeURIComponent(c.id)}">${this.esc(c.name)}</a>`
+            );
+            parts.push(`<p>Parent of ${this.naturalJoin(links)}.</p>`);
+        }
 
-        // Modal backdrop clicks
-        ['personModal', 'eventModal', 'eventDetailModal', 'documentModal', 'settingsModal'].forEach(modalId => {
-            document.getElementById(modalId).addEventListener('click', (e) => {
-                if (e.target.classList.contains('modal-overlay')) {
-                    e.target.classList.remove('active');
+        // Siblings
+        if (siblings.length > 0) {
+            const links = siblings.map(s =>
+                `<a href="#/person/${encodeURIComponent(s.id)}">${this.esc(s.name)}</a>`
+            );
+            parts.push(`<p>Sibling of ${this.naturalJoin(links)}.</p>`);
+        }
+
+        return parts.join('');
+    }
+
+    naturalJoin(items) {
+        if (items.length === 0) return '';
+        if (items.length === 1) return items[0];
+        if (items.length === 2) return `${items[0]} and ${items[1]}`;
+        return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1];
+    }
+
+    getMarriageStatus(personId, spouseId) {
+        const person = this.getPerson(personId);
+        if (!person || !person.marriages) return 'married';
+        const entry = person.marriages.find(m => m.spouseId === spouseId);
+        return entry ? (entry.status || 'married') : 'married';
+    }
+
+    // ─── LIFE EVENTS TIMELINE ──────────────────
+
+    getTimelineEvents(person) {
+        return (person.events || [])
+            .filter(e => e.type !== 'birth' && e.type !== 'death')
+            .filter(e => e.date || e.location || e.description)
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    }
+
+    renderTimelineEvent(event) {
+        const typeLabels = {
+            baptism: 'Baptism',
+            burial: 'Burial',
+            immigration: 'Immigration',
+            residence: 'Residence',
+            occupation: 'Occupation',
+            military: 'Military Service',
+            graduation: 'Graduation',
+            marriage: 'Marriage',
+            census: 'Census',
+            confirmation: 'Confirmation',
+            other: 'Event'
+        };
+        const label = typeLabels[event.type] || this.esc(event.type || 'Event');
+        const date = event.date ? this.formatEventDate(event.date) : '';
+        const location = event.location ? this.esc(event.location) : '';
+        const description = event.description ? this.esc(event.description) : '';
+
+        return `
+            <div class="timeline-event">
+                <div class="timeline-marker"></div>
+                <div class="timeline-content">
+                    <div class="timeline-type">${label}</div>
+                    ${date ? `<div class="timeline-date">${date}</div>` : ''}
+                    ${location ? `<div class="timeline-location">${location}</div>` : ''}
+                    ${description ? `<div class="timeline-description">${description}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    formatEventDate(dateStr) {
+        if (!dateStr) return '';
+        // Handle ISO dates like "1918-03-31"
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            const months = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            const year = parts[0];
+            const monthIdx = parseInt(parts[1], 10) - 1;
+            const day = parseInt(parts[2], 10);
+            if (months[monthIdx]) {
+                return `${months[monthIdx]} ${day}, ${year}`;
+            }
+        }
+        // Handle partial dates like "1918" or "1918-03"
+        if (parts.length === 2) {
+            const months = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            const monthIdx = parseInt(parts[1], 10) - 1;
+            if (months[monthIdx]) {
+                return `${months[monthIdx]} ${parts[0]}`;
+            }
+        }
+        // Return as-is for other formats (decades, descriptive dates)
+        return this.esc(dateStr);
+    }
+
+    // ============================================
+    //   FAMILY PAGE
+    // ============================================
+
+    renderFamily(container) {
+        this.currentView = 'family';
+
+        let html = `
+            <div class="family-page">
+                <div class="family-header">
+                    <h1>The Family</h1>
+                    <p>Explore the branches of our family tree</p>
+                </div>
+                <div class="family-actions">
+                    <button class="btn btn-accent btn-small" onclick="app.openPersonModal()">+ Add Person</button>
+                </div>
+        `;
+
+        if (this.people.length === 0) {
+            html += `
+                <div class="empty-state">
+                    <div class="empty-state-icon">&#128106;</div>
+                    <h3>No family members yet</h3>
+                    <p>Start by adding the people who matter most &mdash; parents, grandparents, the ones whose stories you want to remember.</p>
+                    <button class="btn btn-primary" onclick="app.openPersonModal()">Add Someone</button>
+                </div>
+            `;
+        } else {
+            const branches = this.groupByBranch();
+            for (const [branchName, members] of Object.entries(branches)) {
+                html += this.renderFamilyBranch(branchName, members);
+            }
+        }
+
+        html += `</div>`;
+        container.innerHTML = html;
+        this.observeElements();
+    }
+
+    groupByBranch() {
+        const branches = {};
+
+        this.people.forEach(person => {
+            const branch = person.branch || 'Family';
+            if (!branches[branch]) branches[branch] = [];
+            branches[branch].push(person);
+        });
+
+        // Sort each branch into family-tree order
+        for (const branch of Object.keys(branches)) {
+            branches[branch] = this.orderByGeneration(branches[branch]);
+        }
+
+        return branches;
+    }
+
+    orderByGeneration(people) {
+        const peopleIds = new Set(people.map(p => p.id));
+
+        // Find roots: people whose parents are NOT in this group
+        const roots = people.filter(p =>
+            (!p.fatherId || !peopleIds.has(p.fatherId)) &&
+            (!p.motherId || !peopleIds.has(p.motherId))
+        );
+
+        const ordered = [];
+        const visited = new Set();
+
+        const walk = (person, indent) => {
+            if (visited.has(person.id)) return;
+            visited.add(person.id);
+            ordered.push({ ...person, _indent: indent });
+
+            // Add spouse(s) at the same indent level
+            if (person.spouseIds) {
+                person.spouseIds.forEach(sid => {
+                    const spouse = people.find(p => p.id === sid);
+                    if (spouse && !visited.has(spouse.id)) {
+                        visited.add(spouse.id);
+                        const isDivorced = this.getMarriageStatus(person.id, sid) === 'divorced';
+                        ordered.push({ ...spouse, _indent: indent, _isSpouse: true, _isDivorced: isDivorced });
+                    }
+                });
+            }
+
+            // Add children indented one level
+            const kids = people.filter(p =>
+                p.fatherId === person.id || p.motherId === person.id
+            );
+            kids.sort((a, b) => (a.birthDate || '').localeCompare(b.birthDate || ''));
+            kids.forEach(child => walk(child, indent + 1));
+        };
+
+        // Sort roots: prefer those with more descendants for better tree structure
+        const countDesc = (person) => {
+            const seen = new Set();
+            const stack = [person.id];
+            while (stack.length > 0) {
+                const pid = stack.pop();
+                people.forEach(p => {
+                    if (!seen.has(p.id) && (p.fatherId === pid || p.motherId === pid)) {
+                        seen.add(p.id);
+                        stack.push(p.id);
+                    }
+                });
+            }
+            return seen.size;
+        };
+        roots.sort((a, b) => {
+            const diff = countDesc(b) - countDesc(a);
+            return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
+        });
+
+        // Walk from each root
+        roots.forEach(root => walk(root, 0));
+
+        // Add anyone not visited (no family links to others in group)
+        people.forEach(p => {
+            if (!visited.has(p.id)) {
+                ordered.push({ ...p, _indent: 0 });
+            }
+        });
+
+        return ordered;
+    }
+
+    renderFamilyBranch(branchName, members) {
+        let html = `
+            <div class="family-branch fade-in">
+                <div class="family-branch-header">
+                    <h2>${this.esc(branchName)}</h2>
+                    <div class="family-branch-line"></div>
+                </div>
+        `;
+
+        members.forEach(person => {
+            const indent = Math.min(person._indent || 0, 4);
+            const initials = this.getInitials(person.name);
+            const dates = this.formatDateRange(person.birthDate, person.deathDate);
+
+            html += `
+                <div class="family-member${indent > 0 ? ` family-member-indent-${indent}` : ''}"
+                     onclick="window.location.hash='#/person/${encodeURIComponent(person.id)}'">
+                    ${indent > 0 ? `<span class="family-member-connector">${person._isSpouse ? '\u2665' : '\u2514'}</span>` : ''}
+                    <div class="family-member-avatar">
+                        ${person.photoUrl
+                            ? `<img src="${person.photoUrl}" alt="">`
+                            : initials
+                        }
+                    </div>
+                    <div class="family-member-info">
+                        <div class="family-member-name">${this.esc(person.name)}</div>
+                        ${dates ? `<div class="family-member-detail">${this.esc(dates)}</div>` : ''}
+                        ${person._isSpouse ? `<div class="family-member-spouse${person._isDivorced ? ' divorced' : ''}">${person._isDivorced ? 'former spouse' : 'spouse'}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div>`;
+        return html;
+    }
+
+    // ============================================
+    //   STORY MODAL
+    // ============================================
+
+    openStoryModal(editId = null) {
+        const modal = document.getElementById('storyModal');
+        const form = document.getElementById('storyForm');
+        const title = document.getElementById('storyModalTitle');
+
+        form.reset();
+        document.getElementById('storyEditId').value = '';
+        document.getElementById('coverPhotoPreview').innerHTML = '';
+
+        // Populate the people picker
+        this.populateStoryPeoplePicker();
+
+        if (editId) {
+            const story = this.stories.find(s => s.id === editId);
+            if (story) {
+                title.textContent = 'Edit Story';
+                document.getElementById('storyEditId').value = editId;
+                document.getElementById('storyTitle').value = story.title || '';
+                document.getElementById('storyDate').value = story.date || '';
+                document.getElementById('storyLocation').value = story.location || '';
+                document.getElementById('storyNarrative').value = story.narrative || '';
+                document.getElementById('storyToldBy').value = story.audioToldBy || '';
+                document.getElementById('storyRecordedBy').value = story.audioRecordedBy || '';
+
+                if (story.coverPhotoUrl) {
+                    document.getElementById('coverPhotoPreview').innerHTML =
+                        `<img src="${story.coverPhotoUrl}" alt="Cover preview">`;
+                }
+
+                // Pre-select tagged people
+                (story.peopleIds || []).forEach(pid => {
+                    const chip = document.querySelector(`#storyPeoplePicker [data-person-id="${pid}"]`);
+                    if (chip) chip.classList.add('selected');
+                });
+            }
+        } else {
+            title.textContent = 'Add Story';
+        }
+
+        modal.classList.add('open');
+    }
+
+    closeStoryModal() {
+        document.getElementById('storyModal').classList.remove('open');
+    }
+
+    populateStoryPeoplePicker() {
+        const picker = document.getElementById('storyPeoplePicker');
+        if (!picker) return;
+        picker.innerHTML = this.people.map(p => `
+            <span class="people-picker-chip" data-person-id="${p.id}"
+                  onclick="this.classList.toggle('selected')">
+                ${this.esc(p.name)}
+            </span>
+        `).join('');
+    }
+
+    async handleStorySubmit(event) {
+        event.preventDefault();
+
+        const submitBtn = event.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving\u2026';
+
+        try {
+            const editId = document.getElementById('storyEditId').value;
+            const storyId = editId || `story-${Date.now()}`;
+
+            const selectedPeople = Array.from(
+                document.querySelectorAll('#storyPeoplePicker .selected')
+            ).map(chip => chip.dataset.personId);
+
+            const storyData = {
+                title: document.getElementById('storyTitle').value.trim(),
+                date: document.getElementById('storyDate').value.trim(),
+                location: document.getElementById('storyLocation').value.trim(),
+                narrative: document.getElementById('storyNarrative').value.trim(),
+                audioToldBy: document.getElementById('storyToldBy').value.trim(),
+                audioRecordedBy: document.getElementById('storyRecordedBy').value.trim(),
+                peopleIds: selectedPeople,
+                updatedAt: new Date().toISOString()
+            };
+
+            if (!editId) {
+                storyData.createdAt = new Date().toISOString();
+            }
+
+            // Upload cover photo if provided
+            const coverFile = document.getElementById('storyCoverPhoto').files[0];
+            if (coverFile) {
+                const url = await this.uploadFile(coverFile, `stories/${storyId}/cover`);
+                storyData.coverPhotoUrl = url;
+            }
+
+            // Upload audio if provided
+            const audioFile = document.getElementById('storyAudio').files[0];
+            if (audioFile) {
+                const url = await this.uploadFile(audioFile, `stories/${storyId}/audio`);
+                storyData.audioUrl = url;
+            }
+
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'stories', storyId),
+                storyData,
+                { merge: true }
+            );
+
+            this.closeStoryModal();
+            await this.loadData();
+            this.navigate();
+
+        } catch (err) {
+            console.error('Error saving story:', err);
+            alert('Error saving story. Please try again.');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save Story';
+        }
+    }
+
+    async deleteStory(storyId) {
+        if (!confirm('Are you sure you want to delete this story? This cannot be undone.')) return;
+
+        try {
+            await window.firebaseDeleteDoc(
+                window.firebaseDoc(window.firebaseDb, 'stories', storyId)
+            );
+            await this.loadData();
+            this.navigate();
+        } catch (err) {
+            console.error('Error deleting story:', err);
+            alert('Error deleting story. Please try again.');
+        }
+    }
+
+    // ============================================
+    //   PERSON MODAL
+    // ============================================
+
+    openPersonModal(editId = null) {
+        const modal = document.getElementById('personModal');
+        const form = document.getElementById('personForm');
+        const title = document.getElementById('personModalTitle');
+
+        form.reset();
+        document.getElementById('personEditId').value = '';
+        document.getElementById('personPhotoPreview').innerHTML = '';
+
+        this.populateParentSelects(editId);
+        this.populateSpousePicker(editId);
+
+        // Clear events and photos editors
+        this._pendingPhotos = [];
+        document.getElementById('eventsEditor').innerHTML = '';
+        document.getElementById('photosEditor').innerHTML = '';
+
+        if (editId) {
+            const person = this.getPerson(editId);
+            if (person) {
+                title.textContent = 'Edit Person';
+                document.getElementById('personEditId').value = editId;
+                document.getElementById('personName').value = person.name || '';
+                document.getElementById('personBirthDate').value = person.birthDate || '';
+                document.getElementById('personDeathDate').value = person.deathDate || '';
+                document.getElementById('personBirthPlace').value = person.birthPlace || '';
+                document.getElementById('personBiography').value = person.biography || '';
+                document.getElementById('personBranch').value = person.branch || '';
+                document.getElementById('personFather').value = person.fatherId || '';
+                document.getElementById('personMother').value = person.motherId || '';
+
+                if (person.photoUrl) {
+                    document.getElementById('personPhotoPreview').innerHTML =
+                        `<img src="${person.photoUrl}" alt="Photo preview">`;
+                }
+
+                // Pre-select spouses with marriage status
+                (person.spouseIds || []).forEach(sid => {
+                    const chip = document.querySelector(`#spousePicker [data-person-id="${sid}"]`);
+                    if (chip) {
+                        chip.classList.add('selected');
+                        const status = this.getMarriageStatus(person.id, sid);
+                        chip.dataset.status = status;
+                        if (status === 'divorced') {
+                            chip.classList.add('divorced');
+                        }
+                    }
+                });
+
+                // Populate existing events
+                (person.events || []).forEach(e => this.addEventRow(e));
+
+                // Show existing additional photos
+                this._pendingPhotos = [...(person.photos || [])];
+                this.renderPhotosEditor();
+            }
+        } else {
+            title.textContent = 'Add Person';
+        }
+
+        modal.classList.add('open');
+    }
+
+    closePersonModal() {
+        document.getElementById('personModal').classList.remove('open');
+    }
+
+    populateParentSelects(excludeId) {
+        const fatherSelect = document.getElementById('personFather');
+        const motherSelect = document.getElementById('personMother');
+
+        const options = this.people
+            .filter(p => p.id !== excludeId)
+            .map(p => `<option value="${p.id}">${this.esc(p.name)}</option>`)
+            .join('');
+
+        fatherSelect.innerHTML = `<option value="">Father...</option>${options}`;
+        motherSelect.innerHTML = `<option value="">Mother...</option>${options}`;
+    }
+
+    populateSpousePicker(excludeId) {
+        const picker = document.getElementById('spousePicker');
+        if (!picker) return;
+        picker.innerHTML = this.people
+            .filter(p => p.id !== excludeId)
+            .map(p => `
+                <span class="people-picker-chip" data-person-id="${p.id}" data-status=""
+                      onclick="app.cycleSpouseStatus(this)">
+                    ${this.esc(p.name)}
+                </span>
+            `).join('');
+    }
+
+    cycleSpouseStatus(chip) {
+        const current = chip.dataset.status || '';
+        if (current === '') {
+            // Not selected → married
+            chip.classList.add('selected');
+            chip.dataset.status = 'married';
+        } else if (current === 'married') {
+            // Married → divorced
+            chip.classList.add('divorced');
+            chip.dataset.status = 'divorced';
+        } else {
+            // Divorced → unselected
+            chip.classList.remove('selected', 'divorced');
+            chip.dataset.status = '';
+        }
+    }
+
+    async handlePersonSubmit(event) {
+        event.preventDefault();
+
+        const submitBtn = event.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving\u2026';
+
+        try {
+            const editId = document.getElementById('personEditId').value;
+            const personId = editId || `p${Date.now()}`;
+
+            const selectedSpouseChips = Array.from(
+                document.querySelectorAll('#spousePicker .selected')
+            );
+            const selectedSpouses = selectedSpouseChips.map(chip => chip.dataset.personId);
+            const marriages = selectedSpouseChips.map(chip => ({
+                spouseId: chip.dataset.personId,
+                status: chip.dataset.status || 'married'
+            }));
+
+            // Gather events from editor
+            const events = this.gatherEventsFromEditor();
+
+            const personData = {
+                name: document.getElementById('personName').value.trim(),
+                birthDate: document.getElementById('personBirthDate').value.trim(),
+                deathDate: document.getElementById('personDeathDate').value.trim(),
+                birthPlace: document.getElementById('personBirthPlace').value.trim(),
+                biography: document.getElementById('personBiography').value.trim(),
+                branch: document.getElementById('personBranch').value.trim(),
+                fatherId: document.getElementById('personFather').value || null,
+                motherId: document.getElementById('personMother').value || null,
+                spouseIds: selectedSpouses,
+                marriages: marriages,
+                events: events,
+                photos: this._pendingPhotos || [],
+                updatedAt: new Date().toISOString()
+            };
+
+            if (!editId) {
+                personData.createdAt = new Date().toISOString();
+            }
+
+            // Upload primary photo if provided
+            const photoFile = document.getElementById('personPhoto').files[0];
+            if (photoFile) {
+                const url = await this.uploadFile(photoFile, `people/${personId}/photo`);
+                personData.photoUrl = url;
+            }
+
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'people', personId),
+                personData,
+                { merge: true }
+            );
+
+            // Update reciprocal spouse references
+            for (const spouseId of selectedSpouses) {
+                const spouse = this.getPerson(spouseId);
+                if (spouse) {
+                    const existing = new Set(spouse.spouseIds || []);
+                    existing.add(personId);
+                    await window.firebaseSetDoc(
+                        window.firebaseDoc(window.firebaseDb, 'people', spouseId),
+                        { spouseIds: Array.from(existing) },
+                        { merge: true }
+                    );
+                }
+            }
+
+            this.closePersonModal();
+            await this.loadData();
+            this.navigate();
+
+        } catch (err) {
+            console.error('Error saving person:', err);
+            alert('Error saving person. Please try again.');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save Person';
+        }
+    }
+
+    // ─── EVENTS EDITOR ─────────────────────────
+
+    addEventRow(existing = null) {
+        const editor = document.getElementById('eventsEditor');
+        if (!editor) return;
+
+        const row = document.createElement('div');
+        row.className = 'event-row';
+        row.innerHTML = `
+            <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
+                <select class="form-group-half event-type">
+                    <option value="">Type...</option>
+                    <option value="baptism">Baptism</option>
+                    <option value="burial">Burial</option>
+                    <option value="immigration">Immigration</option>
+                    <option value="residence">Residence</option>
+                    <option value="occupation">Occupation</option>
+                    <option value="military">Military Service</option>
+                    <option value="graduation">Graduation</option>
+                    <option value="marriage">Marriage</option>
+                    <option value="census">Census</option>
+                    <option value="confirmation">Confirmation</option>
+                    <option value="other">Other</option>
+                </select>
+                <input type="text" class="form-group-half event-date" placeholder="Date (e.g., 1918-03-31)">
+            </div>
+            <div class="form-row" style="margin-bottom:12px;align-items:flex-start">
+                <input type="text" class="form-group-half event-location" placeholder="Location">
+                <div class="form-group-half" style="display:flex;gap:8px;align-items:center">
+                    <input type="text" style="flex:1" class="event-description" placeholder="Description (optional)">
+                    <button type="button" class="story-action-btn" onclick="this.closest('.event-row').remove()" title="Remove">&times;</button>
+                </div>
+            </div>
+        `;
+
+        // Pre-fill if editing existing event
+        if (existing) {
+            row.querySelector('.event-type').value = existing.type || '';
+            row.querySelector('.event-date').value = existing.date || '';
+            row.querySelector('.event-location').value = existing.location || '';
+            row.querySelector('.event-description').value = existing.description || '';
+        }
+
+        editor.appendChild(row);
+    }
+
+    gatherEventsFromEditor() {
+        const rows = document.querySelectorAll('#eventsEditor .event-row');
+        const events = [];
+        rows.forEach((row, i) => {
+            const type = row.querySelector('.event-type').value;
+            const date = row.querySelector('.event-date').value.trim();
+            const location = row.querySelector('.event-location').value.trim();
+            const description = row.querySelector('.event-description').value.trim();
+            if (type || date || location) {
+                events.push({
+                    id: `e_${Date.now()}_${i}`,
+                    type: type || 'other',
+                    date,
+                    location,
+                    description
+                });
+            }
+        });
+        return events;
+    }
+
+    // ─── PHOTOS EDITOR ─────────────────────────
+
+    async addPhotoToEditor() {
+        const fileInput = document.getElementById('additionalPhoto');
+        const captionInput = document.getElementById('additionalPhotoCaption');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const editId = document.getElementById('personEditId').value;
+        const personId = editId || `p${Date.now()}`;
+
+        try {
+            const url = await this.uploadFile(file, `people/${personId}/photos/${Date.now()}`);
+            if (!this._pendingPhotos) this._pendingPhotos = [];
+            this._pendingPhotos.push({
+                url,
+                caption: captionInput.value.trim(),
+                uploadedAt: new Date().toISOString()
+            });
+            this.renderPhotosEditor();
+            fileInput.value = '';
+            captionInput.value = '';
+        } catch (err) {
+            console.error('Error uploading photo:', err);
+            alert('Error uploading photo. Please try again.');
+        }
+    }
+
+    renderPhotosEditor() {
+        const container = document.getElementById('photosEditor');
+        if (!container) return;
+        if (!this._pendingPhotos || this._pendingPhotos.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        container.innerHTML = this._pendingPhotos.map((p, i) => `
+            <div class="photo-editor-item" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                <img src="${p.url}" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:6px">
+                <span style="flex:1;font-size:0.85rem;color:var(--text-light)">${this.esc(p.caption) || 'No caption'}</span>
+                <button type="button" class="story-action-btn" onclick="app.removeEditorPhoto(${i})">&times;</button>
+            </div>
+        `).join('');
+    }
+
+    removeEditorPhoto(index) {
+        if (this._pendingPhotos) {
+            this._pendingPhotos.splice(index, 1);
+            this.renderPhotosEditor();
+        }
+    }
+
+    // ─── FILE UPLOAD ───────────────────────────
+
+    async uploadFile(file, path) {
+        const ref = window.firebaseStorageRef(window.firebaseStorage, path);
+        const snapshot = await window.firebaseUploadBytes(ref, file);
+        return await window.firebaseGetDownloadURL(snapshot.ref);
+    }
+
+    // ─── UTILITIES ─────────────────────────────
+
+    esc(text) {
+        if (!text) return '';
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    truncate(text, maxLen) {
+        if (!text) return '';
+        if (text.length <= maxLen) return this.esc(text);
+        return this.esc(text.substring(0, maxLen).trim()) + '\u2026';
+    }
+
+    // ─── ADMIN: DATA CLEANUP ────────────────────
+
+    async cleanupToCore() {
+        const keepIds = new Set(['p1', 'p2', 'p3', 'p4', 'p7', 'p8', 'p9', 'p12']);
+
+        if (!confirm(
+            'This will remove all people except the 8 core family members ' +
+            '(Brian, Allison, Gene, Debra, Robert, Maryann, Conrad, Gladys) ' +
+            'and delete all stories. Continue?'
+        )) {
+            return;
+        }
+
+        try {
+            console.log('Starting cleanup...');
+
+            // Delete people not in keep list
+            const peopleSnap = await window.firebaseGetDocs(
+                window.firebaseCollection(window.firebaseDb, 'people')
+            );
+            const deletePromises = [];
+            peopleSnap.forEach(doc => {
+                if (!keepIds.has(doc.id)) {
+                    deletePromises.push(
+                        window.firebaseDeleteDoc(
+                            window.firebaseDoc(window.firebaseDb, 'people', doc.id)
+                        )
+                    );
                 }
             });
-        });
+            await Promise.all(deletePromises);
+            console.log(`Deleted ${deletePromises.length} people`);
 
-        // Escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
-            }
-        });
+            // Clean up dangling parent references
+            // Robert (p9): parents p30, p31 were deleted
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'people', 'p9'),
+                { fatherId: null, motherId: null },
+                { merge: true }
+            );
 
-        // Pedigree card clicks (delegation)
-        document.getElementById('pedigreeContainer').addEventListener('click', (e) => {
-            const card = e.target.closest('.person-card');
-            if (card && !e.target.closest('.card-action-btn')) {
-                const personId = card.dataset.personId;
-                this.showTimeline(personId);
-            }
-        });
+            // Maryann (p7): parents p15, p13 were deleted
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'people', 'p7'),
+                { fatherId: null, motherId: null },
+                { merge: true }
+            );
 
+            // Conrad (p12): parents deleted, remove Joan (p20) from spouseIds,
+            // set marriage to Gladys as divorced (Joan was second wife)
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'people', 'p12'),
+                {
+                    fatherId: null,
+                    motherId: null,
+                    spouseIds: ['p8'],
+                    marriages: [{ spouseId: 'p8', status: 'divorced' }]
+                },
+                { merge: true }
+            );
+
+            // Gladys (p8): set her marriage to Conrad as divorced too
+            await window.firebaseSetDoc(
+                window.firebaseDoc(window.firebaseDb, 'people', 'p8'),
+                {
+                    marriages: [{ spouseId: 'p12', status: 'divorced' }]
+                },
+                { merge: true }
+            );
+
+            // Delete all stories (fresh start)
+            const storiesSnap = await window.firebaseGetDocs(
+                window.firebaseCollection(window.firebaseDb, 'stories')
+            );
+            const storyDeletes = [];
+            storiesSnap.forEach(doc => {
+                storyDeletes.push(
+                    window.firebaseDeleteDoc(
+                        window.firebaseDoc(window.firebaseDb, 'stories', doc.id)
+                    )
+                );
+            });
+            await Promise.all(storyDeletes);
+            console.log(`Deleted ${storyDeletes.length} stories`);
+
+            console.log('Cleanup complete! Refreshing data...');
+            await this.loadData();
+            this.navigate();
+            alert('Cleanup complete! Only core family members remain.');
+
+        } catch (err) {
+            console.error('Cleanup failed:', err);
+            alert('Cleanup failed: ' + err.message);
+        }
     }
 }
 
-// Initialize the application
-const app = new FamilyTree();
+// ============================================
+//   BOOTSTRAP
+// ============================================
+
+const app = new FamilyStoryApp();
+
+// Initialize when Firebase is ready
+if (window.firebaseDb) {
+    app.init();
+} else {
+    window.addEventListener('firebase-ready', () => app.init());
+}
+
+// Setup photo preview listeners on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+    const setupPreview = (inputId, previewId) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const preview = document.getElementById(previewId);
+            if (file && preview) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    preview.innerHTML = `<img src="${ev.target.result}" alt="Preview">`;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    };
+
+    setupPreview('storyCoverPhoto', 'coverPhotoPreview');
+    setupPreview('personPhoto', 'personPhotoPreview');
+});

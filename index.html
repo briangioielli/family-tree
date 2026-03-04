@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Tree</title>
+    <title>Our Family Story</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
 
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-app.js";
-        import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-firestore.js";
+        import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-firestore.js";
         import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-storage.js";
 
         const firebaseConfig = {
@@ -28,7 +28,7 @@
         const db = getFirestore(firebaseApp);
         const storage = getStorage(firebaseApp);
 
-        // Make Firebase available globally for app.js
+        // Make Firebase available globally
         window.firebaseDb = db;
         window.firebaseCollection = collection;
         window.firebaseDoc = doc;
@@ -36,488 +36,166 @@
         window.firebaseSetDoc = setDoc;
         window.firebaseDeleteDoc = deleteDoc;
         window.firebaseOnSnapshot = onSnapshot;
+        window.firebaseQuery = query;
+        window.firebaseOrderBy = orderBy;
         window.firebaseStorage = storage;
         window.firebaseStorageRef = storageRef;
         window.firebaseUploadBytes = uploadBytes;
         window.firebaseGetDownloadURL = getDownloadURL;
 
-        // Signal that Firebase is ready
         window.dispatchEvent(new Event('firebase-ready'));
     </script>
 </head>
 <body>
-    <div class="app">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="header-left">
-                <h1 class="logo">Family Tree</h1>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="site-nav" id="siteNav">
+            <a href="#/" class="nav-logo">Our Family Story</a>
+            <div class="nav-links">
+                <a href="#/stories" class="nav-link">Stories</a>
+                <a href="#/family" class="nav-link">Family</a>
             </div>
-            <div class="header-center">
-                <div class="search-container">
-                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"/>
-                        <path d="m21 21-4.35-4.35"/>
-                    </svg>
-                    <input type="text" id="searchInput" placeholder="Search for anyone..." autocomplete="off">
-                    <div class="search-results" id="searchResults"></div>
-                </div>
+        </nav>
+
+        <!-- Main content rendered by app.js -->
+        <main id="mainContent">
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>Loading stories...</p>
             </div>
-            <div class="header-right">
-                <button class="btn-icon" id="addPersonBtn" title="Add Person">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                        <line x1="19" y1="8" x2="19" y2="14"/>
-                        <line x1="22" y1="11" x2="16" y2="11"/>
-                    </svg>
-                </button>
-                <button class="btn-icon" id="settingsBtn" title="Settings">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-                    </svg>
-                </button>
-            </div>
-        </header>
-
-        <!-- Main Content Area -->
-        <main class="main-content">
-            <!-- Pedigree Chart View -->
-            <section class="pedigree-view" id="pedigreeView">
-                <div class="view-toggle-container">
-                    <div class="view-toggle" id="viewToggle">
-                        <button class="view-toggle-btn active" data-view="portrait" title="Portrait View">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="6" y="3" width="12" height="18" rx="2"/>
-                                <circle cx="12" cy="9" r="2"/>
-                                <line x1="12" y1="13" x2="12" y2="17"/>
-                            </svg>
-                            <span>Portrait</span>
-                        </button>
-                        <button class="view-toggle-btn" data-view="landscape" title="Landscape View">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="6" width="18" height="12" rx="2"/>
-                                <circle cx="9" cy="12" r="2"/>
-                                <line x1="13" y1="12" x2="17" y2="12"/>
-                            </svg>
-                            <span>Landscape</span>
-                        </button>
-                    </div>
-                    <div class="focus-controls">
-                        <div class="focus-indicator" id="focusIndicator">
-                            <span class="focus-label">Viewing:</span>
-                            <span class="focus-person-name" id="focusPersonName">Full Tree</span>
-                        </div>
-                        <div class="focus-toggle">
-                            <button class="focus-toggle-btn active" id="focusModeBtn" title="Show Focused Lineage">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="3"/>
-                                    <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-                                </svg>
-                                <span>Focus</span>
-                            </button>
-                            <button class="focus-toggle-btn" id="showAllBtn" title="Show Everyone">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                                    <circle cx="9" cy="7" r="4"/>
-                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                                </svg>
-                                <span>All</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="pedigree-container" id="pedigreeContainer">
-                    <!-- Pedigree chart will be rendered here -->
-                </div>
-            </section>
-
-            <!-- Individual Timeline View (hidden by default) -->
-            <section class="timeline-view hidden" id="timelineView">
-                <div class="timeline-container">
-                    <button class="back-btn" id="backToTree">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M19 12H5M12 19l-7-7 7-7"/>
-                        </svg>
-                        Back to Tree
-                    </button>
-
-                    <div class="person-header" id="personHeader">
-                        <!-- Person header info will be rendered here -->
-                    </div>
-
-                    <div class="timeline-content" id="timelineContent">
-                        <!-- Timeline events will be rendered here -->
-                    </div>
-                </div>
-            </section>
         </main>
+    </div>
 
-        <!-- Add/Edit Person Modal -->
-        <div class="modal-overlay" id="personModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h2 id="modalTitle">Add Person</h2>
-                    <button class="modal-close" id="closeModal">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
-                </div>
-                <form id="personForm" class="modal-body">
-                    <input type="hidden" id="personId">
-
-                    <div class="form-section">
-                        <h3>Basic Information</h3>
-
-                        <div class="form-group">
-                            <label for="personName">Full Name</label>
-                            <input type="text" id="personName" required placeholder="Enter full name">
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="birthDate">Birth Date</label>
-                                <input type="date" id="birthDate">
-                            </div>
-                            <div class="form-group">
-                                <label for="deathDate">Death Date</label>
-                                <input type="date" id="deathDate" placeholder="Leave blank if living">
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="birthPlace">Birth Place</label>
-                            <input type="text" id="birthPlace" placeholder="City, State, Country">
-                        </div>
-
-                        <div class="form-group quick-events-group" id="quickEventsGroup">
-                            <label>Quick Add Events</label>
-                            <div class="quick-events-options">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="createBirthEvent" checked>
-                                    <span>Create birth event</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="createDeathEvent">
-                                    <span>Create death event (if date provided)</span>
-                                </label>
-                            </div>
-                            <span class="form-hint">These events will be added to the person's timeline automatically</span>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Profile Photo</label>
-                            <div class="photo-upload-container">
-                                <div class="photo-preview" id="photoPreview">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                        <circle cx="8.5" cy="8.5" r="1.5"/>
-                                        <polyline points="21 15 16 10 5 21"/>
-                                    </svg>
-                                </div>
-                                <div class="photo-upload-options">
-                                    <label class="btn btn-small btn-secondary photo-upload-btn">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                            <polyline points="17 8 12 3 7 8"/>
-                                            <line x1="12" y1="3" x2="12" y2="15"/>
-                                        </svg>
-                                        Upload Photo
-                                        <input type="file" id="photoFile" accept="image/*" hidden>
-                                    </label>
-                                    <span class="photo-or">or</span>
-                                    <input type="text" id="photoUrl" placeholder="Paste image URL" class="photo-url-input">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <h3>Family Connections</h3>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="fatherId">Father</label>
-                                <select id="fatherId">
-                                    <option value="">-- Select Father --</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="motherId">Mother</label>
-                                <select id="motherId">
-                                    <option value="">-- Select Mother --</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="spouseIds">Spouse(s)</label>
-                            <select id="spouseIds" multiple>
-                            </select>
-                            <span class="form-hint">Hold Ctrl/Cmd to select multiple</span>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <h3>Biography</h3>
-                        <div class="form-group">
-                            <label for="biography">Short Bio</label>
-                            <textarea id="biography" rows="3" placeholder="A brief description of this person's life..."></textarea>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <h3>General Documents</h3>
-                        <div class="form-group">
-                            <label>Photos & Documents</label>
-                            <span class="form-hint">Add general documents like family photos, certificates, etc.</span>
-                            <div class="documents-list" id="personDocuments"></div>
-                            <div class="add-document-row">
-                                <input type="text" id="personDocUrl" placeholder="Paste image/document URL">
-                                <input type="text" id="personDocLabel" placeholder="Label">
-                                <button type="button" class="btn btn-small" id="addPersonDocBtn">Add</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Person</button>
-                    </div>
-                </form>
+    <!-- Story Editor Modal -->
+    <div class="modal-overlay" id="storyModal">
+        <div class="modal-content story-editor">
+            <div class="modal-header">
+                <h2 id="storyModalTitle">Add Story</h2>
+                <button class="modal-close" onclick="app.closeStoryModal()">&times;</button>
             </div>
-        </div>
-
-        <!-- Add/Edit Event Modal -->
-        <div class="modal-overlay" id="eventModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h2 id="eventModalTitle">Add Life Event</h2>
-                    <button class="modal-close" id="closeEventModal">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
+            <form id="storyForm" onsubmit="app.handleStorySubmit(event)">
+                <div class="form-group">
+                    <label for="storyTitle">Story Title</label>
+                    <input type="text" id="storyTitle" placeholder="e.g., The Crossing, Sunday Dinners on 43rd Street" required>
                 </div>
-                <form id="eventForm" class="modal-body">
-                    <input type="hidden" id="eventId">
-                    <input type="hidden" id="eventPersonId">
-
-                    <div class="form-group">
-                        <label for="eventType">Event Type</label>
-                        <select id="eventType" required>
-                            <option value="">-- Select Type --</option>
-                            <option value="birth">Birth</option>
-                            <option value="baptism">Baptism / Christening</option>
-                            <option value="education">Education</option>
-                            <option value="graduation">Graduation</option>
-                            <option value="military">Military Service</option>
-                            <option value="occupation">Occupation / Career</option>
-                            <option value="marriage">Marriage</option>
-                            <option value="divorce">Divorce</option>
-                            <option value="residence">Residence</option>
-                            <option value="immigration">Immigration</option>
-                            <option value="medical">Medical Event</option>
-                            <option value="achievement">Achievement / Award</option>
-                            <option value="story">Story / Memory</option>
-                            <option value="death">Death</option>
-                            <option value="burial">Burial</option>
-                            <option value="custom">Other</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" id="customTitleGroup" style="display: none;">
-                        <label for="eventCustomTitle">Event Title</label>
-                        <input type="text" id="eventCustomTitle" placeholder="Name this event">
-                    </div>
-
-                    <div class="form-group" id="linkedPersonGroup" style="display: none;">
-                        <label for="eventLinkedPerson">Related Person</label>
-                        <select id="eventLinkedPerson">
-                            <option value="">-- Select Person --</option>
-                        </select>
-                        <span class="form-hint" id="linkedPersonHint">Select the spouse for this marriage</span>
-                    </div>
-
+                <div class="form-group">
+                    <label for="storyDate">When (year, decade, or date)</label>
+                    <input type="text" id="storyDate" placeholder="e.g., 1904, 1950s, Summer 1962">
+                </div>
+                <div class="form-group">
+                    <label for="storyLocation">Where</label>
+                    <input type="text" id="storyLocation" placeholder="e.g., Santa Maria Capua Vetere, Italy">
+                </div>
+                <div class="form-group">
+                    <label for="storyNarrative">The Story</label>
+                    <textarea id="storyNarrative" rows="8" placeholder="Tell the story in your own words..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="storyCoverPhoto">Cover Photo</label>
+                    <input type="file" id="storyCoverPhoto" accept="image/*">
+                    <div id="coverPhotoPreview" class="photo-preview"></div>
+                </div>
+                <div class="form-group">
+                    <label for="storyAudio">Audio Recording</label>
+                    <input type="file" id="storyAudio" accept="audio/*">
                     <div class="form-row">
-                        <div class="form-group">
-                            <label for="eventDate">Date</label>
-                            <input type="date" id="eventDate">
+                        <div class="form-group form-group-half">
+                            <label for="storyToldBy">Told by</label>
+                            <input type="text" id="storyToldBy" placeholder="e.g., Uncle Frank">
                         </div>
-                        <div class="form-group">
-                            <label for="eventEndDate">End Date (optional)</label>
-                            <input type="date" id="eventEndDate">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="eventLocation">Location</label>
-                        <input type="text" id="eventLocation" placeholder="City, State, Country">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="eventDescription">Description / Story</label>
-                        <textarea id="eventDescription" rows="4" placeholder="Tell the story of this event..."></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Photos & Documents</label>
-                        <div class="documents-list" id="eventDocuments"></div>
-                        <div class="add-document-row">
-                            <input type="text" id="docUrl" placeholder="Paste image/document URL">
-                            <input type="text" id="docLabel" placeholder="Label">
-                            <button type="button" class="btn btn-small" id="addDocBtn">Add</button>
+                        <div class="form-group form-group-half">
+                            <label for="storyRecordedBy">Recorded by</label>
+                            <input type="text" id="storyRecordedBy" placeholder="e.g., Brian">
                         </div>
                     </div>
-
-                    <div class="form-section audio-story-form-section">
-                        <h3>Audio Story</h3>
-                        <div class="form-group">
-                            <label>Audio Recording</label>
-                            <span class="form-hint">Upload an mp3 or m4a file of an oral history or story</span>
-                            <div class="audio-upload-container">
-                                <label class="btn btn-small btn-secondary audio-upload-label">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <polyline points="17 8 12 3 7 8"/>
-                                        <line x1="12" y1="3" x2="12" y2="15"/>
-                                    </svg>
-                                    Upload Audio
-                                    <input type="file" id="eventAudioFile" accept=".mp3,.m4a,audio/mpeg,audio/mp4" hidden>
-                                </label>
-                                <div class="audio-upload-status" id="audioUploadStatus"></div>
-                            </div>
-                            <input type="hidden" id="eventAudioUrl">
-                        </div>
-                        <div class="form-group">
-                            <label>Story Cover Photo</label>
-                            <span class="form-hint">A photo to display with this audio story</span>
-                            <div class="story-photo-upload-container">
-                                <label class="btn btn-small btn-secondary">
-                                    Upload Photo
-                                    <input type="file" id="eventStoryPhotoFile" accept="image/*" hidden>
-                                </label>
-                                <span class="form-or">or</span>
-                                <input type="text" id="eventStoryPhotoUrl" placeholder="Paste image URL">
-                            </div>
-                            <div class="story-photo-preview" id="storyPhotoPreview"></div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="eventAudioToldBy">Told By</label>
-                                <input type="text" id="eventAudioToldBy" placeholder="e.g., Deb Gioielli">
-                            </div>
-                            <div class="form-group">
-                                <label for="eventAudioRecordedBy">Recorded By</label>
-                                <input type="text" id="eventAudioRecordedBy" placeholder="e.g., Olive Gioielli">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <h3>Source Citation</h3>
-                        <div class="form-group">
-                            <label for="eventSourceTitle">Source Title</label>
-                            <input type="text" id="eventSourceTitle" placeholder="e.g., Birth Certificate, Census Record">
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="eventSourceUrl">Source URL</label>
-                                <input type="text" id="eventSourceUrl" placeholder="Link to source document">
-                            </div>
-                            <div class="form-group">
-                                <label for="eventSourceDate">Date Accessed</label>
-                                <input type="date" id="eventSourceDate">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="eventSourceNotes">Citation Notes</label>
-                            <textarea id="eventSourceNotes" rows="2" placeholder="Repository, record number, or additional details..."></textarea>
-                        </div>
-                    </div>
-
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" id="cancelEventBtn">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Event</button>
-                    </div>
-                </form>
-            </div>
+                </div>
+                <div class="form-group">
+                    <label>People in this story</label>
+                    <div id="storyPeoplePicker" class="people-picker"></div>
+                </div>
+                <input type="hidden" id="storyEditId">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="app.closeStoryModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Story</button>
+                </div>
+            </form>
         </div>
+    </div>
 
-        <!-- Event Detail View Modal -->
-        <div class="modal-overlay" id="eventDetailModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h2 id="eventDetailTitle">Event Details</h2>
-                    <button class="modal-close" id="closeEventDetailModal">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="modal-body" id="eventDetailContent">
-                    <!-- Event detail content will be rendered here -->
-                </div>
+    <!-- Person Editor Modal -->
+    <div class="modal-overlay" id="personModal">
+        <div class="modal-content person-editor">
+            <div class="modal-header">
+                <h2 id="personModalTitle">Add Person</h2>
+                <button class="modal-close" onclick="app.closePersonModal()">&times;</button>
             </div>
-        </div>
-
-        <!-- Document Viewer Modal -->
-        <div class="modal-overlay" id="documentModal">
-            <div class="modal modal-large">
-                <div class="modal-header">
-                    <h2 id="documentTitle">Document</h2>
-                    <button class="modal-close" id="closeDocumentModal">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
+            <form id="personForm" onsubmit="app.handlePersonSubmit(event)">
+                <div class="form-group">
+                    <label for="personName">Full Name</label>
+                    <input type="text" id="personName" required>
                 </div>
-                <div class="document-viewer" id="documentViewer">
-                    <!-- Document content will be rendered here -->
+                <div class="form-row">
+                    <div class="form-group form-group-half">
+                        <label for="personBirthDate">Born</label>
+                        <input type="text" id="personBirthDate" placeholder="e.g., 1881-11-21 or 1880s">
+                    </div>
+                    <div class="form-group form-group-half">
+                        <label for="personDeathDate">Died</label>
+                        <input type="text" id="personDeathDate" placeholder="Leave blank if living">
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Settings Modal -->
-        <div class="modal-overlay" id="settingsModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h2>Settings</h2>
-                    <button class="modal-close" id="closeSettingsModal">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                        </svg>
-                    </button>
+                <div class="form-group">
+                    <label for="personBirthPlace">Birthplace</label>
+                    <input type="text" id="personBirthPlace" placeholder="e.g., Santa Maria Capua Vetere, Italy">
                 </div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label>Appearance</label>
-                        <div class="theme-toggle-container">
-                            <span class="theme-label">Dark Mode</span>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="darkModeToggle">
-                                <span class="toggle-slider"></span>
-                            </label>
+                <div class="form-group">
+                    <label for="personPhoto">Photo</label>
+                    <input type="file" id="personPhoto" accept="image/*">
+                    <div id="personPhotoPreview" class="photo-preview"></div>
+                </div>
+                <div class="form-group">
+                    <label for="personBiography">About them</label>
+                    <textarea id="personBiography" rows="4" placeholder="A few sentences about this person..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="personBranch">Family Branch</label>
+                    <input type="text" id="personBranch" placeholder="e.g., Gioielli, Brennan, Miller">
+                </div>
+                <div class="form-group">
+                    <label>Parents</label>
+                    <div class="form-row">
+                        <select id="personFather" class="form-group-half"><option value="">Father...</option></select>
+                        <select id="personMother" class="form-group-half"><option value="">Mother...</option></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Spouse(s)</label>
+                    <div id="spousePicker" class="people-picker"></div>
+                </div>
+                <div class="form-group">
+                    <label>Life Events <span style="font-weight:400;color:var(--text-muted)">(baptism, military, immigration, etc.)</span></label>
+                    <div id="eventsEditor" class="events-editor"></div>
+                    <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px" onclick="app.addEventRow()">+ Add Event</button>
+                </div>
+                <div class="form-group">
+                    <label>Additional Photos</label>
+                    <div id="photosEditor" class="photos-editor"></div>
+                    <div class="form-row" style="margin-top:8px;align-items:flex-end">
+                        <div class="form-group-half">
+                            <input type="file" id="additionalPhoto" accept="image/*">
+                        </div>
+                        <div class="form-group-half">
+                            <input type="text" id="additionalPhotoCaption" placeholder="Caption (optional)">
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label>Data Management</label>
-                        <div class="button-group">
-                            <button type="button" class="btn btn-secondary" id="exportDataBtn">Export Data</button>
-                            <label class="btn btn-secondary">
-                                Import Data
-                                <input type="file" id="importDataInput" accept=".json" hidden>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Danger Zone</label>
-                        <button type="button" class="btn btn-danger" id="clearDataBtn">Clear All Data</button>
-                    </div>
+                    <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px" onclick="app.addPhotoToEditor()">+ Add Photo</button>
                 </div>
-            </div>
+                <input type="hidden" id="personEditId">
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="app.closePersonModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Person</button>
+                </div>
+            </form>
         </div>
     </div>
 
