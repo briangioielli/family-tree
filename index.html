@@ -190,6 +190,11 @@
                     </div>
                     <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px" onclick="app.addPhotoToEditor()">+ Add Photo</button>
                 </div>
+                <div class="form-group">
+                    <label>Documents &amp; Records <span style="font-weight:400;color:var(--text-muted)">(census, immigration papers, certificates, etc.)</span></label>
+                    <div id="documentsEditor" class="documents-editor"></div>
+                    <button type="button" class="btn btn-secondary btn-small" style="margin-top:8px" onclick="app.addDocumentRow()">+ Add Document</button>
+                </div>
                 <input type="hidden" id="personEditId">
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="app.closePersonModal()">Cancel</button>

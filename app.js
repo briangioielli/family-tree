@@ -548,7 +548,7 @@ class FamilyStoryApp {
 
         const timelineEvents = this.getTimelineEvents(person);
         const photos = person.photos || [];
-        const hasRichContent = person.biography || stories.length > 0 || person.photoUrl || timelineEvents.length > 0 || photos.length > 0;
+        const hasRichContent = person.biography || stories.length > 0 || person.photoUrl || timelineEvents.length > 0 || photos.length > 0 || (person.documents && person.documents.length > 0);
         const connectionsHtml = this.buildConnectionsText(person, father, mother, spouses, children, siblings);
 
         let html = `
@@ -615,6 +615,28 @@ class FamilyStoryApp {
             `;
         }
 
+        // Documents & records
+        const docs = person.documents || [];
+        if (docs.length > 0) {
+            html += `
+                <section class="person-section fade-in">
+                    <div class="person-section-title">Documents &amp; Records</div>
+                    <div class="person-documents">
+                        ${docs.map(d => `
+                            <a href="${this.esc(d.url)}" target="_blank" rel="noopener" class="document-link">
+                                <span class="document-icon">${this.getDocIcon(d.type)}</span>
+                                <span class="document-info">
+                                    <span class="document-label">${this.esc(d.label)}</span>
+                                    ${d.description ? `<span class="document-desc">${this.esc(d.description)}</span>` : ''}
+                                </span>
+                                <span class="document-external">&#8599;</span>
+                            </a>
+                        `).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
         // Family connections as natural readable text
         if (connectionsHtml) {
             html += `
@@ -636,6 +658,9 @@ class FamilyStoryApp {
                 </section>
             `;
         }
+
+        // Relationship finder
+        html += this.renderRelationshipFinder(personId);
 
         // Warm "beginning" treatment for minimal-content pages
         if (!hasRichContent && !connectionsHtml) {
@@ -744,13 +769,21 @@ class FamilyStoryApp {
             baptism: 'Baptism',
             burial: 'Burial',
             immigration: 'Immigration',
+            arrival: 'Arrival',
+            naturalization: 'Naturalization',
             residence: 'Residence',
             occupation: 'Occupation',
             military: 'Military Service',
+            draft: 'Draft Registration',
             graduation: 'Graduation',
             marriage: 'Marriage',
+            divorce: 'Divorce',
             census: 'Census',
             confirmation: 'Confirmation',
+            communion: 'Communion',
+            ordination: 'Ordination',
+            adoption: 'Adoption',
+            retirement: 'Retirement',
             other: 'Event'
         };
         const label = typeLabels[event.type] || this.esc(event.type || 'Event');
@@ -845,9 +878,13 @@ class FamilyStoryApp {
         const branches = {};
 
         this.people.forEach(person => {
-            const branch = person.branch || 'Family';
-            if (!branches[branch]) branches[branch] = [];
-            branches[branch].push(person);
+            const branchStr = person.branch || 'Family';
+            // Support comma-separated branches (e.g., "Miller, Gioielli")
+            const branchList = branchStr.split(',').map(b => b.trim()).filter(Boolean);
+            branchList.forEach(branch => {
+                if (!branches[branch]) branches[branch] = [];
+                branches[branch].push(person);
+            });
         });
 
         // Sort each branch into family-tree order
@@ -1120,10 +1157,11 @@ class FamilyStoryApp {
         this.populateParentSelects(editId);
         this.populateSpousePicker(editId);
 
-        // Clear events and photos editors
+        // Clear events and photos and documents editors
         this._pendingPhotos = [];
         document.getElementById('eventsEditor').innerHTML = '';
         document.getElementById('photosEditor').innerHTML = '';
+        document.getElementById('documentsEditor').innerHTML = '';
 
         if (editId) {
             const person = this.getPerson(editId);
@@ -1163,6 +1201,9 @@ class FamilyStoryApp {
                 // Show existing additional photos
                 this._pendingPhotos = [...(person.photos || [])];
                 this.renderPhotosEditor();
+
+                // Populate existing documents
+                (person.documents || []).forEach(d => this.addDocumentRow(d));
             }
         } else {
             title.textContent = 'Add Person';
@@ -1241,6 +1282,9 @@ class FamilyStoryApp {
             // Gather events from editor
             const events = this.gatherEventsFromEditor();
 
+            // Gather documents from editor
+            const documents = this.gatherDocumentsFromEditor();
+
             const personData = {
                 name: document.getElementById('personName').value.trim(),
                 birthDate: document.getElementById('personBirthDate').value.trim(),
@@ -1253,6 +1297,7 @@ class FamilyStoryApp {
                 spouseIds: selectedSpouses,
                 marriages: marriages,
                 events: events,
+                documents: documents,
                 photos: this._pendingPhotos || [],
                 updatedAt: new Date().toISOString()
             };
@@ -1314,15 +1359,23 @@ class FamilyStoryApp {
                 <select class="form-group-half event-type">
                     <option value="">Type...</option>
                     <option value="baptism">Baptism</option>
-                    <option value="burial">Burial</option>
-                    <option value="immigration">Immigration</option>
-                    <option value="residence">Residence</option>
-                    <option value="occupation">Occupation</option>
-                    <option value="military">Military Service</option>
+                    <option value="communion">Communion</option>
+                    <option value="confirmation">Confirmation</option>
                     <option value="graduation">Graduation</option>
                     <option value="marriage">Marriage</option>
+                    <option value="divorce">Divorce</option>
+                    <option value="occupation">Occupation</option>
+                    <option value="military">Military Service</option>
+                    <option value="draft">Draft Registration</option>
+                    <option value="immigration">Immigration</option>
+                    <option value="arrival">Arrival</option>
+                    <option value="naturalization">Naturalization</option>
+                    <option value="residence">Residence</option>
                     <option value="census">Census</option>
-                    <option value="confirmation">Confirmation</option>
+                    <option value="adoption">Adoption</option>
+                    <option value="ordination">Ordination</option>
+                    <option value="retirement">Retirement</option>
+                    <option value="burial">Burial</option>
                     <option value="other">Other</option>
                 </select>
                 <input type="text" class="form-group-half event-date" placeholder="Date (e.g., 1918-03-31)">
@@ -1417,6 +1470,310 @@ class FamilyStoryApp {
             this._pendingPhotos.splice(index, 1);
             this.renderPhotosEditor();
         }
+    }
+
+    // ─── DOCUMENT HELPERS ────────────────────────
+
+    getDocIcon(type) {
+        const icons = {
+            census: '📋',
+            immigration: '🚢',
+            military: '🎖️',
+            certificate: '📜',
+            photo: '📷',
+            newspaper: '📰',
+            letter: '✉️',
+            legal: '⚖️',
+            religious: '✝️',
+            other: '📄'
+        };
+        return icons[type] || icons.other;
+    }
+
+    // ─── DOCUMENTS EDITOR ───────────────────────
+
+    addDocumentRow(existing = null) {
+        const editor = document.getElementById('documentsEditor');
+        if (!editor) return;
+
+        const row = document.createElement('div');
+        row.className = 'document-row';
+        row.innerHTML = `
+            <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
+                <input type="text" class="doc-label" placeholder="Label (e.g., 1920 Census)" style="flex:1">
+                <select class="doc-type" style="width:130px">
+                    <option value="other">Type...</option>
+                    <option value="census">Census</option>
+                    <option value="immigration">Immigration</option>
+                    <option value="military">Military</option>
+                    <option value="certificate">Certificate</option>
+                    <option value="photo">Photo</option>
+                    <option value="newspaper">Newspaper</option>
+                    <option value="letter">Letter</option>
+                    <option value="legal">Legal</option>
+                    <option value="religious">Religious</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-row" style="margin-bottom:12px;align-items:flex-start">
+                <input type="text" class="doc-url" placeholder="URL (Google Drive share link, etc.)" style="flex:1">
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="text" class="doc-description" placeholder="Note (optional)" style="width:160px">
+                    <button type="button" class="story-action-btn" onclick="this.closest('.document-row').remove()" title="Remove">&times;</button>
+                </div>
+            </div>
+        `;
+
+        if (existing) {
+            row.querySelector('.doc-label').value = existing.label || '';
+            row.querySelector('.doc-type').value = existing.type || 'other';
+            row.querySelector('.doc-url').value = existing.url || '';
+            row.querySelector('.doc-description').value = existing.description || '';
+        }
+
+        editor.appendChild(row);
+    }
+
+    gatherDocumentsFromEditor() {
+        const rows = document.querySelectorAll('#documentsEditor .document-row');
+        const documents = [];
+        rows.forEach((row, i) => {
+            const label = row.querySelector('.doc-label').value.trim();
+            const type = row.querySelector('.doc-type').value;
+            const url = row.querySelector('.doc-url').value.trim();
+            const description = row.querySelector('.doc-description').value.trim();
+            if (label && url) {
+                documents.push({
+                    id: `d_${Date.now()}_${i}`,
+                    label,
+                    type: type || 'other',
+                    url,
+                    description
+                });
+            }
+        });
+        return documents;
+    }
+
+    // ─── RELATIONSHIP CALCULATOR ────────────────
+
+    findRelationship(personId1, personId2) {
+        if (personId1 === personId2) return 'This is the same person!';
+
+        // BFS to find the path between two people through parent/child/spouse links
+        const visited = new Set();
+        const queue = [{ id: personId1, path: [{ id: personId1, rel: 'start' }] }];
+        visited.add(personId1);
+
+        while (queue.length > 0) {
+            const { id, path } = queue.shift();
+            const person = this.getPerson(id);
+            if (!person) continue;
+
+            // Don't search too deep
+            if (path.length > 20) continue;
+
+            const neighbors = [];
+
+            // Parents
+            if (person.fatherId) neighbors.push({ id: person.fatherId, rel: 'parent' });
+            if (person.motherId) neighbors.push({ id: person.motherId, rel: 'parent' });
+
+            // Children
+            const children = this.getChildren(id);
+            children.forEach(c => neighbors.push({ id: c.id, rel: 'child' }));
+
+            // Spouses
+            (person.spouseIds || []).forEach(sid => neighbors.push({ id: sid, rel: 'spouse' }));
+
+            for (const neighbor of neighbors) {
+                if (visited.has(neighbor.id)) continue;
+                visited.add(neighbor.id);
+
+                const newPath = [...path, { id: neighbor.id, rel: neighbor.rel }];
+
+                if (neighbor.id === personId2) {
+                    return this.describeRelationship(newPath);
+                }
+
+                queue.push({ id: neighbor.id, path: newPath });
+            }
+        }
+
+        return 'No known family connection found.';
+    }
+
+    describeRelationship(path) {
+        // Build a sequence of moves: 'parent', 'child', 'spouse'
+        const moves = path.slice(1).map(p => p.rel);
+        const person1 = this.getPerson(path[0].id);
+        const person2 = this.getPerson(path[path.length - 1].id);
+        if (!person1 || !person2) return 'Unknown relationship';
+
+        const name1 = person1.name;
+        const name2 = person2.name;
+
+        // Try to determine gender from relationships for proper terms
+        const getGender = (person) => {
+            // Check if this person is someone's father or mother
+            for (const p of this.people) {
+                if (p.fatherId === person.id) return 'male';
+                if (p.motherId === person.id) return 'female';
+            }
+            return 'unknown';
+        };
+
+        const gender2 = getGender(person2);
+
+        // Count parent/child moves
+        const ups = moves.filter(m => m === 'parent').length;    // going up to ancestors
+        const downs = moves.filter(m => m === 'child').length;   // going down to descendants
+        const hasSpouse = moves.includes('spouse');
+
+        // Simple direct relationships
+        if (moves.length === 1) {
+            if (moves[0] === 'spouse') return `${name2} is ${name1}'s spouse.`;
+            if (moves[0] === 'parent') return `${name2} is ${name1}'s ${gender2 === 'female' ? 'mother' : gender2 === 'male' ? 'father' : 'parent'}.`;
+            if (moves[0] === 'child') return `${name2} is ${name1}'s ${gender2 === 'female' ? 'daughter' : gender2 === 'male' ? 'son' : 'child'}.`;
+        }
+
+        // Pure ancestor chain (all 'parent')
+        if (downs === 0 && !hasSpouse && ups > 0) {
+            const prefix = ups === 1 ? '' : ups === 2 ? 'grand' : 'great-'.repeat(ups - 2) + 'grand';
+            const term = gender2 === 'female' ? 'mother' : gender2 === 'male' ? 'father' : 'parent';
+            return `${name2} is ${name1}'s ${prefix}${term}.`;
+        }
+
+        // Pure descendant chain (all 'child')
+        if (ups === 0 && !hasSpouse && downs > 0) {
+            const prefix = downs === 1 ? '' : downs === 2 ? 'grand' : 'great-'.repeat(downs - 2) + 'grand';
+            const term = gender2 === 'female' ? 'daughter' : gender2 === 'male' ? 'son' : 'child';
+            return `${name2} is ${name1}'s ${prefix}${term}.`;
+        }
+
+        // Siblings: 1 up, 1 down
+        if (ups === 1 && downs === 1 && !hasSpouse) {
+            const term = gender2 === 'female' ? 'sister' : gender2 === 'male' ? 'brother' : 'sibling';
+            return `${name2} is ${name1}'s ${term}.`;
+        }
+
+        // Uncle/Aunt: 2 up, 1 down
+        if (ups === 2 && downs === 1 && !hasSpouse) {
+            const term = gender2 === 'female' ? 'aunt' : gender2 === 'male' ? 'uncle' : 'aunt/uncle';
+            return `${name2} is ${name1}'s ${term}.`;
+        }
+
+        // Niece/Nephew: 1 up, 2 down
+        if (ups === 1 && downs === 2 && !hasSpouse) {
+            const term = gender2 === 'female' ? 'niece' : gender2 === 'male' ? 'nephew' : 'niece/nephew';
+            return `${name2} is ${name1}'s ${term}.`;
+        }
+
+        // Great uncle/aunt: 3 up, 1 down
+        if (ups === 3 && downs === 1 && !hasSpouse) {
+            const term = gender2 === 'female' ? 'great-aunt' : gender2 === 'male' ? 'great-uncle' : 'great-aunt/uncle';
+            return `${name2} is ${name1}'s ${term}.`;
+        }
+
+        // Great-niece/nephew: 1 up, 3 down
+        if (ups === 1 && downs === 3 && !hasSpouse) {
+            const term = gender2 === 'female' ? 'great-niece' : gender2 === 'male' ? 'great-nephew' : 'great-niece/nephew';
+            return `${name2} is ${name1}'s ${term}.`;
+        }
+
+        // Cousins: same ups and downs (2+, 2+)
+        if (ups === downs && ups >= 2 && !hasSpouse) {
+            if (ups === 2) return `${name2} is ${name1}'s first cousin.`;
+            if (ups === 3) return `${name2} is ${name1}'s second cousin.`;
+            return `${name2} is ${name1}'s ${this.ordinal(ups - 1)} cousin.`;
+        }
+
+        // Cousins removed: different ups and downs (both >= 2)
+        if (ups >= 2 && downs >= 2 && !hasSpouse) {
+            const cousinDeg = Math.min(ups, downs) - 1;
+            const removed = Math.abs(ups - downs);
+            if (cousinDeg >= 1 && removed >= 1) {
+                return `${name2} is ${name1}'s ${this.ordinal(cousinDeg)} cousin, ${removed}x removed.`;
+            }
+        }
+
+        // In-law via spouse: ends or starts with spouse
+        if (hasSpouse && moves.length >= 2) {
+            // Spouse's parent = in-law
+            if (moves[0] === 'spouse' && moves.slice(1).every(m => m === 'parent')) {
+                const inlawUps = ups;
+                if (inlawUps === 1) {
+                    const term = gender2 === 'female' ? 'mother-in-law' : gender2 === 'male' ? 'father-in-law' : 'parent-in-law';
+                    return `${name2} is ${name1}'s ${term}.`;
+                }
+            }
+            // Parent's spouse (step-parent)
+            if (moves[moves.length - 1] === 'spouse' && moves.slice(0, -1).every(m => m === 'parent')) {
+                const term = gender2 === 'female' ? 'step-mother' : gender2 === 'male' ? 'step-father' : 'step-parent';
+                return `${name2} is ${name1}'s ${term}.`;
+            }
+            // Spouse's sibling = sibling-in-law
+            if (moves.length === 3 && moves[0] === 'spouse' && moves[1] === 'parent' && moves[2] === 'child') {
+                const term = gender2 === 'female' ? 'sister-in-law' : gender2 === 'male' ? 'brother-in-law' : 'sibling-in-law';
+                return `${name2} is ${name1}'s ${term}.`;
+            }
+            // Sibling's spouse = sibling-in-law
+            if (moves.length === 3 && moves[0] === 'parent' && moves[1] === 'child' && moves[2] === 'spouse') {
+                const term = gender2 === 'female' ? 'sister-in-law' : gender2 === 'male' ? 'brother-in-law' : 'sibling-in-law';
+                return `${name2} is ${name1}'s ${term}.`;
+            }
+            // Child's spouse = child-in-law
+            if (moves.length === 2 && moves[0] === 'child' && moves[1] === 'spouse') {
+                const term = gender2 === 'female' ? 'daughter-in-law' : gender2 === 'male' ? 'son-in-law' : 'child-in-law';
+                return `${name2} is ${name1}'s ${term}.`;
+            }
+            // Spouse's child = step-child
+            if (moves.length === 2 && moves[0] === 'spouse' && moves[1] === 'child') {
+                const term = gender2 === 'female' ? 'step-daughter' : gender2 === 'male' ? 'step-son' : 'step-child';
+                return `${name2} is ${name1}'s ${term}.`;
+            }
+        }
+
+        // Fallback: describe the path
+        return `${name2} is related to ${name1} (${moves.length - (hasSpouse ? 0 : 0)} steps through the family tree).`;
+    }
+
+    ordinal(n) {
+        const suffixes = ['th', 'st', 'nd', 'rd'];
+        const v = n % 100;
+        return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+    }
+
+    renderRelationshipFinder(personId) {
+        const others = this.people.filter(p => p.id !== personId);
+        if (others.length === 0) return '';
+
+        return `
+            <section class="person-section fade-in">
+                <div class="person-section-title">How Are We Related?</div>
+                <div class="relationship-finder">
+                    <div class="relationship-finder-row">
+                        <select id="relationshipTarget" class="relationship-select">
+                            <option value="">Select a person...</option>
+                            ${others.map(p => `<option value="${p.id}">${this.esc(p.name)}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-secondary btn-small" onclick="app.showRelationship('${personId}')">Find Relationship</button>
+                    </div>
+                    <div id="relationshipResult" class="relationship-result"></div>
+                </div>
+            </section>
+        `;
+    }
+
+    showRelationship(fromPersonId) {
+        const targetId = document.getElementById('relationshipTarget').value;
+        const resultEl = document.getElementById('relationshipResult');
+        if (!targetId) {
+            resultEl.innerHTML = '<p class="relationship-empty">Pick someone from the list above.</p>';
+            return;
+        }
+        const result = this.findRelationship(fromPersonId, targetId);
+        resultEl.innerHTML = `<p class="relationship-answer">${this.esc(result)}</p>`;
     }
 
     // ─── FILE UPLOAD ───────────────────────────
