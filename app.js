@@ -846,9 +846,13 @@ class FamilyStoryApp {
         const branches = {};
 
         this.people.forEach(person => {
-            const branch = person.branch || 'Family';
-            if (!branches[branch]) branches[branch] = [];
-            branches[branch].push(person);
+            const branchField = person.branch || 'Family';
+            const personBranches = branchField.split(',').map(b => b.trim()).filter(Boolean);
+            if (personBranches.length === 0) personBranches.push('Family');
+            for (const branch of personBranches) {
+                if (!branches[branch]) branches[branch] = [];
+                branches[branch].push(person);
+            }
         });
 
         // Sort each branch into family-tree order
