@@ -934,40 +934,106 @@ class FamilyStoryApp {
     }
 
     renderFamilyBranch(branchName, members) {
+        const safeId = branchName.replace(/[^a-zA-Z0-9]/g, '_');
         let html = `
-            <div class="family-branch fade-in">
-                <div class="family-branch-header">
+            <div class="family-branch fade-in" id="branch-${safeId}">
+                <div class="family-branch-header" onclick="app.toggleBranch('${safeId}')">
+                    <span class="family-branch-chevron">▾</span>
                     <h2>${this.esc(branchName)}</h2>
                     <div class="family-branch-line"></div>
                 </div>
+                <div class="family-branch-members">
         `;
 
-        members.forEach(person => {
+        let i = 0;
+        while (i < members.length) {
+            const person = members[i];
             const indent = Math.min(person._indent || 0, 4);
-            const initials = this.getInitials(person.name);
-            const dates = this.formatDateRange(person.birthDate, person.deathDate);
 
-            html += `
-                <div class="family-member${indent > 0 ? ` family-member-indent-${indent}` : ''}"
-                     onclick="window.location.hash='#/person/${encodeURIComponent(person.id)}'">
-                    ${indent > 0 ? `<span class="family-member-connector">${person._isSpouse ? '\u2665' : '\u2514'}</span>` : ''}
+            // Check if next entry is a spouse at the same indent — render as couple
+            const next = members[i + 1];
+            if (next && next._isSpouse && next._indent === person._indent) {
+                html += this.renderCoupleRow(person, next, indent);
+                i += 2;
+            } else if (person._isSpouse) {
+                // Spouse without a preceding partner (shouldn't happen, but handle gracefully)
+                html += this.renderSingleMemberRow(person, indent);
+                i++;
+            } else {
+                html += this.renderSingleMemberRow(person, indent);
+                i++;
+            }
+        }
+
+        html += `</div></div>`;
+        return html;
+    }
+
+    renderCoupleRow(person, spouse, indent) {
+        const initials1 = this.getInitials(person.name);
+        const initials2 = this.getInitials(spouse.name);
+        const dates1 = this.formatDateRange(person.birthDate, person.deathDate);
+        const dates2 = this.formatDateRange(spouse.birthDate, spouse.deathDate);
+        const heartSymbol = spouse._isDivorced ? '♡' : '♥';
+        const divorceClass = spouse._isDivorced ? ' couple-divorced' : '';
+
+        return `
+            <div class="family-couple${indent > 0 ? ` family-member-indent-${indent}` : ''}${divorceClass}">
+                ${indent > 0 ? `<span class="family-member-connector">└</span>` : ''}
+                <div class="family-couple-person" onclick="window.location.hash='#/person/${encodeURIComponent(person.id)}'">
                     <div class="family-member-avatar">
                         ${person.photoUrl
                             ? `<img src="${this.escAttr(person.photoUrl)}" alt="">`
-                            : initials
+                            : initials1
                         }
                     </div>
                     <div class="family-member-info">
                         <div class="family-member-name">${this.esc(person.name)}</div>
-                        ${dates ? `<div class="family-member-detail">${this.esc(dates)}</div>` : ''}
-                        ${person._isSpouse ? `<div class="family-member-spouse${person._isDivorced ? ' divorced' : ''}">${person._isDivorced ? 'former spouse' : 'spouse'}</div>` : ''}
+                        ${dates1 ? `<div class="family-member-detail">${this.esc(dates1)}</div>` : ''}
                     </div>
                 </div>
-            `;
-        });
+                <span class="family-couple-heart">${heartSymbol}</span>
+                <div class="family-couple-person" onclick="window.location.hash='#/person/${encodeURIComponent(spouse.id)}'">
+                    <div class="family-member-avatar">
+                        ${spouse.photoUrl
+                            ? `<img src="${this.escAttr(spouse.photoUrl)}" alt="">`
+                            : initials2
+                        }
+                    </div>
+                    <div class="family-member-info">
+                        <div class="family-member-name">${this.esc(spouse.name)}</div>
+                        ${dates2 ? `<div class="family-member-detail">${this.esc(dates2)}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
 
-        html += `</div>`;
-        return html;
+    renderSingleMemberRow(person, indent) {
+        const initials = this.getInitials(person.name);
+        const dates = this.formatDateRange(person.birthDate, person.deathDate);
+
+        return `
+            <div class="family-member${indent > 0 ? ` family-member-indent-${indent}` : ''}"
+                 onclick="window.location.hash='#/person/${encodeURIComponent(person.id)}'">
+                ${indent > 0 ? `<span class="family-member-connector">└</span>` : ''}
+                <div class="family-member-avatar">
+                    ${person.photoUrl
+                        ? `<img src="${this.escAttr(person.photoUrl)}" alt="">`
+                        : initials
+                    }
+                </div>
+                <div class="family-member-info">
+                    <div class="family-member-name">${this.esc(person.name)}</div>
+                    ${dates ? `<div class="family-member-detail">${this.esc(dates)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    toggleBranch(safeId) {
+        const branch = document.getElementById(`branch-${safeId}`);
+        if (branch) branch.classList.toggle('collapsed');
     }
 
     // ============================================
