@@ -184,11 +184,31 @@ class FamilyStoryApp {
             .slice(0, 2);
     }
 
+    // Convert stored YYYY-MM-DD to display MM-DD-YYYY
+    toDisplayDate(dateStr) {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3 && parts[0].length === 4) {
+            return `${parts[1]}-${parts[2]}-${parts[0]}`;
+        }
+        return dateStr; // return as-is if not YYYY-MM-DD (e.g., "1880s")
+    }
+
+    // Convert input MM-DD-YYYY to storage YYYY-MM-DD
+    toStorageDate(dateStr) {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3 && parts[2].length === 4) {
+            return `${parts[2]}-${parts[0]}-${parts[1]}`;
+        }
+        return dateStr; // return as-is if not MM-DD-YYYY (e.g., "1880s")
+    }
+
     formatDateRange(birth, death) {
         if (!birth && !death) return '';
-        if (birth && death) return `${birth} \u2013 ${death}`;
-        if (birth) return `b. ${birth}`;
-        return `d. ${death}`;
+        if (birth && death) return `${this.toDisplayDate(birth)} \u2013 ${this.toDisplayDate(death)}`;
+        if (birth) return `b. ${this.toDisplayDate(birth)}`;
+        return `d. ${this.toDisplayDate(death)}`;
     }
 
     // ─── ROUTING ───────────────────────────────
@@ -1257,8 +1277,8 @@ class FamilyStoryApp {
                 title.textContent = 'Edit Person';
                 document.getElementById('personEditId').value = editId;
                 document.getElementById('personName').value = person.name || '';
-                document.getElementById('personBirthDate').value = person.birthDate || '';
-                document.getElementById('personDeathDate').value = person.deathDate || '';
+                document.getElementById('personBirthDate').value = this.toDisplayDate(person.birthDate) || '';
+                document.getElementById('personDeathDate').value = this.toDisplayDate(person.deathDate) || '';
                 document.getElementById('personBirthPlace').value = person.birthPlace || '';
                 document.getElementById('personBiography').value = person.biography || '';
                 document.getElementById('personBranch').value = person.branch || '';
@@ -1369,8 +1389,8 @@ class FamilyStoryApp {
 
             const personData = {
                 name: document.getElementById('personName').value.trim(),
-                birthDate: document.getElementById('personBirthDate').value.trim(),
-                deathDate: document.getElementById('personDeathDate').value.trim(),
+                birthDate: this.toStorageDate(document.getElementById('personBirthDate').value.trim()),
+                deathDate: this.toStorageDate(document.getElementById('personDeathDate').value.trim()),
                 birthPlace: document.getElementById('personBirthPlace').value.trim(),
                 biography: document.getElementById('personBiography').value.trim(),
                 branch: document.getElementById('personBranch').value.trim(),
@@ -1477,7 +1497,7 @@ class FamilyStoryApp {
                     <option value="confirmation">Confirmation</option>
                     <option value="other">Other</option>
                 </select>
-                <input type="text" class="form-group-half event-date" placeholder="Date (e.g., 1918-03-31)">
+                <input type="text" class="form-group-half event-date" placeholder="Date (e.g., 03-31-1918)">
             </div>
             <div class="form-row" style="margin-bottom:12px;align-items:flex-start">
                 <input type="text" class="form-group-half event-location" placeholder="Location">
@@ -1491,7 +1511,7 @@ class FamilyStoryApp {
         // Pre-fill if editing existing event
         if (existing) {
             row.querySelector('.event-type').value = existing.type || '';
-            row.querySelector('.event-date').value = existing.date || '';
+            row.querySelector('.event-date').value = this.toDisplayDate(existing.date) || '';
             row.querySelector('.event-location').value = existing.location || '';
             row.querySelector('.event-description').value = existing.description || '';
         }
@@ -1511,7 +1531,7 @@ class FamilyStoryApp {
                 events.push({
                     id: `e_${Date.now()}_${i}`,
                     type: type || 'other',
-                    date,
+                    date: this.toStorageDate(date),
                     location,
                     description
                 });
